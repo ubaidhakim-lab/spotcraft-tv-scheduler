@@ -540,12 +540,8 @@ def allocate_spots_daily(
             by_day[d].append((slot_weights[i] * wf, t, day_dates[d]))
         by_day[d].sort(key=lambda x: (-x[0], x[1]))
     allocated = []
-    used: set = set(used_slots)
 
-    def _slot_key(dt, t):
-        return (dt, format_time(t))
-
-    # Compute per-day target quotas proportional to weekend_factor weights.
+    # Per-day target quotas proportional to weekend_factor weights.
     # This is how weekend_boost actually shifts spot distribution across days.
     day_weight = {d: weekend_factor[d] for d in active_day_names}
     total_w = sum(day_weight.values())
@@ -560,69 +556,39 @@ def allocate_spots_daily(
     for k in range(remainder):
         day_quota[frac_order[k % len(frac_order)]] += 1
 
-    def _try_pick_from_day(d):
-        """Pop the next free slot for day d, honoring `used`. Return (t, dt) or None."""
-        while by_day[d]:
-            w, t, dt = by_day[d].pop(0)
-            if _slot_key(dt, t) not in used:
-                return (t, dt)
-        return None
+    # Build full slot inventory for the week (immutable list of (weight, time, date)).
+    # We no longer pop from by_day — instead we iterate this deterministic list and
+    # place spots evenly across days first, then across time slots within each day.
+    slot_inventory: Dict[str, List] = {d: [] for d in active_day_names}
+    for d in active_day_names:
+        wf = weekend_factor[d]
+        for i, t in enumerate(slot_times):
+            slot_inventory[d].append((slot_weights[i] * wf, t, day_dates[d]))
+        # sort by descending weight, then time ascending
+        slot_inventory[d].sort(key=lambda x: (-x[0], x[1]))
 
+    # Per-day quotas already computed above.
     if reach_vs_frequency <= 0.5:
-        # Reach mode: round-robin across days, but each day capped at its quota
-        remaining = dict(day_quota)
-        # Weighted round-robin: visit each day proportional to remaining quota
-        while sum(remaining.values()) > 0:
-            picked_any = False
-            for d in active_day_names:
-                if remaining[d] <= 0 or not by_day[d]:
-                    continue
-                pick = _try_pick_from_day(d)
-                if pick is None:
-                    remaining[d] = 0
-                    continue
-                t, dt = pick
+        # Reach mode: distribute quota[d] across each day's slots evenly.
+        for d in active_day_names:
+            need = day_quota[d]
+            if need <= 0 or not slot_inventory[d]:
+                continue
+            slots = slot_inventory[d]
+            for i in range(need):
+                _, t, dt = slots[i % len(slots)]
                 allocated.append((d, dt, t))
-                used.add(_slot_key(dt, t))
-                remaining[d] -= 1
-                picked_any = True
-            if not picked_any:
-                break
     else:
-        # Frequency mode: fill each day (heaviest-weight first) up to its quota
+        # Frequency mode: heaviest-weight day first, fill by rotating through its slots.
         order = sorted(active_day_names, key=lambda d: -day_weight[d])
         for d in order:
             need = day_quota[d]
-            while need > 0:
-                pick = _try_pick_from_day(d)
-                if pick is None:
-                    break
-                t, dt = pick
+            if need <= 0 or not slot_inventory[d]:
+                continue
+            slots = slot_inventory[d]
+            for i in range(need):
+                _, t, dt = slots[i % len(slots)]
                 allocated.append((d, dt, t))
-                used.add(_slot_key(dt, t))
-                need -= 1
-
-    # If quotas dropped spots (day ran out of slots but had remaining quota),
-    # rebalance the leftover to any other day with slots.
-    shortfall = count - len(allocated)
-    if shortfall > 0:
-        pool = [d for d in active_day_names if by_day[d]]
-        while shortfall > 0 and pool:
-            progressed = False
-            for d in list(pool):
-                pick = _try_pick_from_day(d)
-                if pick is None:
-                    pool.remove(d)
-                    continue
-                t, dt = pick
-                allocated.append((d, dt, t))
-                used.add(_slot_key(dt, t))
-                shortfall -= 1
-                progressed = True
-                if shortfall == 0:
-                    break
-            if not progressed:
-                break
 
     return allocated
 
@@ -697,41 +663,28 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
     edit_rows: List[Dict[str, Any]] = []
 
     def compute_edit_capacity(row: Dict, edit_duration: int) -> int:
-        """Max possible spots for this program-timeband-edit given the campaign window.
-
-        capacity = eligible_days_per_week × slots_per_day_at_this_frequency × eligible_weeks
-        minus dates in blackout that would have been active.
+        """Return 0 only if the row has no eligible day within the campaign window
+        (fully blacked out). Otherwise capacity is effectively unlimited: when
+        planned spots exceed available unique half-hour slots, the allocator
+        stacks multiple spots into the same slot so that no planned spot is
+        ever dropped.
         """
         days_list = [d for d in parse_days(row.get("days")) if d not in blackout]
         if not days_list:
             return 0
-        st = parse_time(row.get("start_time")) or timedelta(hours=6)
-        et = parse_time(row.get("end_time")) or (st + timedelta(hours=1))
-        if et <= st:
-            et = st + timedelta(hours=1)
-        freq = prefs.movies_frequency_minutes if is_movies(row.get("genre")) else prefs.spot_frequency_minutes
-        step = timedelta(minutes=max(5, freq))
-        slots_per_day = 0
-        cur = st
-        while cur < et:
-            slots_per_day += 1
-            cur += step
-        if slots_per_day == 0:
-            slots_per_day = 1
         eff_weeks = weeks
         if is_gec(row.get("genre")) and prefs.gec_planning_weeks:
             eff_weeks = min(weeks, prefs.gec_planning_weeks)
-        # Estimate blackout impact — count blackout dates that fall on allowed days within eligible weeks
-        blk_hits = 0
-        for bd in blackout_date_set:
-            dow = DAY_ORDER[bd.weekday()]
-            if dow not in days_list:
-                continue
-            wk_idx = (bd - schedule_start).days // 7
-            if 0 <= wk_idx < eff_weeks:
-                blk_hits += 1
-        capacity = len(days_list) * slots_per_day * eff_weeks - blk_hits * slots_per_day
-        return max(0, capacity)
+        # Check at least one non-blacked-out day exists within eff_weeks
+        for w in range(eff_weeks):
+            for i in range(7):
+                d = schedule_start + timedelta(days=7 * w + i)
+                if camp_end and d > camp_end:
+                    break
+                dow = DAY_ORDER[d.weekday()]
+                if dow in days_list and d not in blackout_date_set:
+                    return 10 ** 9  # effectively unlimited — stacking is allowed
+        return 0
 
     for r in doc["parsed_rows"]:
         fct = safe_num(r.get("fct"))

@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 16 backend testing for 'do not drop spots' fix. 13/14 tests pass. Core invariant (len(schedule_rows) == sum(final_spots)) HOLDS across simple GEC, stacking-over-capacity (500 spots in 1 movies hour band -> stacked 35-36/day), multi-row multi-edit, weekly_grp_dispersion, weekend_boost, reach_vs_frequency=1.0, gec_planning_weeks, blackouts (dates + day-of-week), and campaign_end. Upload parses all standard columns. Excel download returns valid workbook with correct GRAND TOTAL. Sessions CRUD works. One finding: GEC 100-spot / 3-edit / Mon-Fri / 4-week test shows per-date max/min ratio of 1.75 (4..7 spots/day) vs the spec's <1.5x target - however each individual edit distributes evenly (30s:2-3, 20s:1-2, 10s:1-2 per day); the aggregate skew comes from independent per-edit allocations stacking. Also observed: with FCT-preservation rounding, 100 requested spots -> final_spots=99 (60/30/10 pct * 2200 FCT / 30/20/10 = 44/33/22 = 99). This is upstream of the scheduler and unrelated to the 'no drop' fix.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/plans/{plan_id}/generate",
+        "issue": "GEC even-distribution: on 100 spots x 3 edits (60/30/10 pct) x Mon-Fri x 4 weeks, aggregate per-date spots range 4..7 (ratio 1.75) which exceeds the spec target of <1.5x. Each individual edit is evenly spread; skew is from independent allocations stacking on same dates. Consider a second-pass balancer that aligns per-day totals across edits within a row."
+      },
+      {
+        "endpoint": "/api/plans/{plan_id}/generate",
+        "issue": "Edit-split rounding can shave off up to (num_edits - 1) spots from the requested total when FCT/duration doesn't divide evenly (e.g. 100 spots @ ACD=22 -> final_spots=99). The 'no spot dropped' invariant is preserved *after* edit split; original->final rounding is a separate concern. If user expects 100 == sum(final_spots), add a leftover-distribution step in generate_plan lines ~703-732."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration16_no_drop.py",
+    "/app/test_reports/pytest/iter16.xml"
+  ],
+  "action_items": [
+    "Consider adding a per-day rebalancer so aggregated spots across edits of the same row also satisfy <1.5x max/min ratio (currently individual edits are even but aggregates can drift).",
+    "Consider distributing rounding remainder when splitting original_spots -> per-edit spots so sum(final_spots) == original_spots exactly (currently up to N-1 spots lost to floor rounding via FCT path)."
+  ],
+  "critical_code_review_comments": [
+    "server.py compute_edit_capacity returns 10**9 sentinel - works but a boolean 'has_valid_day' + separate capping path would be cleaner and avoid the surplus/headroom loop entirely.",
+    "server.py generate_plan still >700 lines - continue to consider splitting into scheduling/workbook/routes modules (repeat feedback from iter13-15).",
+    "backend_test.py::TestLearnSample::test_learn_output still references missing /tmp/samples/output.xlsx (pre-existing, unrelated).",
+    "allocate_spots_daily comment refers to 'popping from by_day' but code no longer pops - stale doc-comment on line 561-562."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration16_no_drop.py"],
+  "success_rate": {"backend": "93% (13/14 iter16 tests; 1 aggregation-evenness assertion missed by 0.25)", "frontend": "N/A (backend only)"},
+  "seed_data_creation": "All test plans built in-memory via openpyxl (no fixture files needed).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 16 verified: no-drop invariant (len(schedule_rows) == sum(final_spots)) holds across all tested mixes including 500-spot stacking scenario. Two minor improvements available: (1) per-day aggregate rebalancer for multi-edit rows to tighten the <1.5x target; (2) distribute rounding remainder in the FCT->edit-spots split so original_spots is preserved exactly. Neither breaks the current 'no spot dropped' contract."
+}
