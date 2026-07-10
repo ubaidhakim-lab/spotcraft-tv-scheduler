@@ -41,15 +41,19 @@ class DaypartWeight(BaseModel):
 
 class SchedulingPrefs(BaseModel):
     campaign_start: str
-    campaign_end: Optional[str] = None  # YYYY-MM-DD; if omitted, campaign_weeks is used
+    campaign_end: Optional[str] = None
     campaign_weeks: int = 6
     spot_frequency_minutes: int = 30
+    movies_frequency_minutes: int = 60  # 1 spot every 60 min on movie channels
+    movies_genres: List[str] = ["MOV", "Movies", "Movie"]
     gec_genres: List[str] = ["GEC"]
     gec_planning_weeks: Optional[int] = None
     weekly_grp_dispersion: List[float] = []
     blackout_days: List[str] = []
-    blackout_dates: List[str] = []  # ISO date strings YYYY-MM-DD (frontend converts from DD-MM-YY)
+    blackout_dates: List[str] = []
     daypart_weights: List[DaypartWeight] = []
+    weekend_boost: float = 1.0  # multiplier on Sat/Sun; 1 = neutral, >1 = more, <1 = less
+    reach_vs_frequency: float = 0.5  # 0 = max reach (spread across days), 1 = max frequency (concentrate)
 
 class GenerateRequest(BaseModel):
     edits: List[EditConfig]
@@ -485,17 +489,26 @@ def apply_daypart_weights(slot_times: List[timedelta], weights: Dict[str, float]
         return [1.0] * len(slot_times)
     return [x / total * len(slot_times) for x in out]
 
-def allocate_spots_daily(days_list: List[str], slot_times: List[timedelta], slot_weights: List[float], count: int, week_start: date, blackout_dates: set = None, campaign_end: Optional[date] = None, week_index: int = 0):
+def allocate_spots_daily(
+    days_list: List[str],
+    slot_times: List[timedelta],
+    slot_weights: List[float],
+    count: int,
+    week_start: date,
+    blackout_dates: set = None,
+    campaign_end: Optional[date] = None,
+    week_index: int = 0,
+    weekend_boost: float = 1.0,
+    reach_vs_frequency: float = 0.5,
+    used_slots: Optional[set] = None,
+):
     """Return list of (day_name, date, timedelta) for scheduled spots.
 
-    week_start is the first calendar date of this week (may be any day-of-week).
-    days_list is the list of allowed day-of-week names (e.g. ['Mon','Tue']).
-    blackout_dates is an optional set of `date` objects to exclude.
-    campaign_end caps the schedule strictly — no spot on a date > campaign_end.
-    week_index rotates the starting day within the allowed set so allocation is
-    balanced across all valid days over the campaign.
+    Never places a spot on a day-of-week outside days_list, past campaign_end,
+    on a blackout_date, or on a (date, time) already present in used_slots.
     """
     blackout_dates = blackout_dates or set()
+    used_slots = used_slots if used_slots is not None else set()
     # Build up to 7 dates of this week; skip dates beyond campaign_end
     day_dates: Dict[str, date] = {}
     for i in range(7):
@@ -507,36 +520,73 @@ def allocate_spots_daily(days_list: List[str], slot_times: List[timedelta], slot
             day_dates[dow] = d
     if not day_dates:
         return []
-    # Rotate the day order per week so spots don't always start on the first allowed day
+    # Keep only days_list days that actually have a date this week
     active_day_names = [d for d in days_list if d in day_dates]
     if not active_day_names:
         return []
+    # Rotate start-of-week to balance across all valid days over the campaign
     if len(active_day_names) > 1:
         off = week_index % len(active_day_names)
         active_day_names = active_day_names[off:] + active_day_names[:off]
-    # Build weighted pool per day
+    # Apply weekend boost to slot_weights per day (Sat/Sun weighted differently)
+    weekend_factor: Dict[str, float] = {}
+    for d in active_day_names:
+        weekend_factor[d] = weekend_boost if d in ("Sat", "Sun") else 1.0
+    # Build slot pool per day; each entry is a (weight, time, date) tuple.
     by_day: Dict[str, List] = {d: [] for d in active_day_names}
     for d in active_day_names:
+        wf = weekend_factor[d]
         for i, t in enumerate(slot_times):
-            by_day[d].append((slot_weights[i], t, day_dates[d]))
+            by_day[d].append((slot_weights[i] * wf, t, day_dates[d]))
         by_day[d].sort(key=lambda x: (-x[0], x[1]))
     allocated = []
-    di = 0
-    active = [d for d in active_day_names if by_day[d]]
-    while count > 0 and active:
-        d = active[di % len(active)]
-        w, t, dt = by_day[d].pop(0)
-        allocated.append((d, dt, t))
-        count -= 1
-        di += 1
-        if not by_day[d]:
-            active = [x for x in active if by_day[x]]
-            di = 0
-    # If still remaining (no slots left) reuse first day/slot
-    while count > 0:
-        d = active_day_names[0]
-        allocated.append((d, day_dates[d], slot_times[0]))
-        count -= 1
+    # Normalize slot key: always (date, "HH:MM" string). Callers use format_time too.
+    used: set = set(used_slots)
+
+    def _slot_key(dt, t):
+        return (dt, format_time(t))
+
+    if reach_vs_frequency <= 0.5:
+        # Reach mode: round-robin across days
+        di = 0
+        active = [d for d in active_day_names if by_day[d]]
+        while count > 0 and active:
+            d = active[di % len(active)]
+            popped = None
+            while by_day[d]:
+                w, t, dt = by_day[d].pop(0)
+                if _slot_key(dt, t) not in used:
+                    popped = (w, t, dt)
+                    break
+            if popped is None:
+                # exhausted
+                active = [x for x in active if by_day[x]]
+                if not active:
+                    break
+                di = 0
+                continue
+            _, t, dt = popped
+            allocated.append((d, dt, t))
+            used.add(_slot_key(dt, t))
+            count -= 1
+            di += 1
+            if not by_day[d]:
+                active = [x for x in active if by_day[x]]
+                di = 0
+    else:
+        # Frequency mode: fill each day before moving to next
+        for d in active_day_names:
+            while count > 0 and by_day[d]:
+                w, t, dt = by_day[d].pop(0)
+                if _slot_key(dt, t) in used:
+                    continue
+                allocated.append((d, dt, t))
+                used.add(_slot_key(dt, t))
+                count -= 1
+            if count <= 0:
+                break
+
+    # No reuse-fallback: overflow spots are dropped rather than double-book a slot.
     return allocated
 
 @api_router.post("/plans/{plan_id}/generate")
@@ -651,6 +701,13 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
     schedule_rows: List[Dict[str, Any]] = []
     blackout = set(prefs.blackout_days or [])
 
+    def is_movies(g):
+        return any(k.lower() in str(g or "").lower() for k in (prefs.movies_genres or []))
+
+    # Global slot occupancy: (channel, program, start_time, end_time) -> set of (date, time)
+    # Prevents 2 spots in the same half-hour band even across edit sub-rows.
+    slot_occupancy: Dict[tuple, set] = {}
+
     for er in edit_rows:
         n_spots = er["final_spots"]
         if n_spots <= 0:
@@ -664,7 +721,9 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
         if et <= st:
             et = st + timedelta(hours=1)
 
-        step = timedelta(minutes=max(5, prefs.spot_frequency_minutes))
+        # Movies channels use 60-min default spot frequency
+        freq_min = prefs.movies_frequency_minutes if is_movies(er.get("genre")) else prefs.spot_frequency_minutes
+        step = timedelta(minutes=max(5, freq_min))
         slot_times = []
         cur = st
         while cur < et:
@@ -697,15 +756,33 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
             week_start = schedule_start + timedelta(days=7 * w_idx)
             if week_start > camp_end:
                 break
-            allocated = allocate_spots_daily(days_list, slot_times, slot_weights, ws_count, week_start, blackout_date_set, camp_end, week_index=w_idx)
+            # Global slot uniqueness: share the occupancy across ALL edit sub-rows
+            # for this (channel, program, timeband) so no half-hour is used twice.
+            occ_key = (er.get("channel"), er.get("program"), er.get("start_time"), er.get("end_time"))
+            occ = slot_occupancy.setdefault(occ_key, set())
+            allocated = allocate_spots_daily(
+                days_list, slot_times, slot_weights, ws_count, week_start,
+                blackout_date_set, camp_end,
+                week_index=w_idx,
+                weekend_boost=float(prefs.weekend_boost or 1.0),
+                reach_vs_frequency=float(prefs.reach_vs_frequency if prefs.reach_vs_frequency is not None else 0.5),
+                used_slots=occ,
+            )
             for (d, d_date, t) in allocated:
+                actual_dow = DAY_ORDER[d_date.weekday()]
+                if actual_dow not in days_list:
+                    continue
+                if d_date in blackout_date_set:
+                    continue
+                slot_key = (d_date, format_time(t))
+                occ.add(slot_key)
                 schedule_rows.append({
                     "_row_id": er["_row_id"],
                     "index_value": er["index_value"],
                     "edit_duration": er["edit_duration"],
                     "week": w_idx + 1,
                     "date": d_date.isoformat(),
-                    "day": d,
+                    "day": actual_dow,
                     "market": er.get("market"),
                     "genre": er.get("genre"),
                     "channel": er.get("channel"),

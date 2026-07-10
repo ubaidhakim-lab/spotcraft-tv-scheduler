@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 11 acceptance testing: 8/9 backend pytest cases PASS. 1 real backend bug found: weekend_boost slider is a no-op. Frontend E2E fully works: all 3 new controls (weekend-boost-slider, reach-frequency-slider, movies-frequency-input) present with correct data-testids, sliders update labels live (1.5x, 0.30), full upload→edit→prefs→generate→results→download flow OK, 0 console errors/warnings.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/plans/{plan_id}/generate",
+        "issue": "weekend_boost slider has NO EFFECT on schedule. Tested boost=0.5, 1.0, 2.0, 3.0 -> weekend spot count is IDENTICAL (1320/4253, 31.0%) in all cases. Root cause in allocate_spots_daily(): the weekend_factor multiplier is applied to slot_weights only, but slot_weights are used solely to SORT slot-times WITHIN a day (sort key = -weight). They do not influence how many spots each day receives. Reach mode does pure round-robin across active_day_names ignoring weights; frequency mode iterates active_day_names in fixed order also ignoring weights. Fix: either (a) weight day selection in reach mode by weekend_factor (e.g., use weighted random or repeat weekend days in the round-robin pool by weekend_factor), or (b) allocate day-quotas up-front proportional to weekend_factor before distributing spots. NOTE: main agent's earlier curl audit claim of '30.7% vs 25% with boost=1.5' could NOT be reproduced.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration11.py",
+    "/app/test_reports/pytest/iteration11.xml"
+  ],
+  "action_items": [
+    "Fix weekend_boost so it actually shifts spot distribution toward weekend days. Suggest weighting day-selection (not just slot-selection) by weekend_factor in both reach and frequency modes of allocate_spots_daily.",
+    "After fix, re-run test_iteration11.py::TestWeekendBoost to confirm high-boost yields strictly more Sat/Sun spots than low-boost."
+  ],
+  "critical_code_review_comments": [
+    "allocate_spots_daily: weekend_factor only mutates slot_weights (intra-day ordering) — does NOT change per-day quota. Slider label reads 'Multiplier applied to Sat & Sun slots' but effectively multiplies weight of already-chosen weekend slot times, leaving day allocation unchanged.",
+    "server.py is 1249 lines — approaching split threshold; consider extracting scheduling logic into a separate module.",
+    "Passed acceptance items: strict day-of-week (0 violations across 4253 rows), no slot dupes per _row_id or per (channel,program,timeband,date,time), movies rows all on hourly boundaries, reach_vs_frequency=0.0 gives 1456 distinct (rowid,date) pairs vs 1327 at =1.0, GEC Mon-Sun programs with ≥7 spots all spread across ≥5 of 7 days."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration11.py"],
+  "success_rate": {"backend": "89% (8/9 acceptance tests)", "frontend": "100%"},
+  "seed_data_creation": "None; used /tmp/samples/input.xlsx",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Re-run /app/backend/tests/test_iteration11.py after main agent fixes weekend_boost day-quota logic. All other acceptance criteria + frontend E2E already verified. Frontend flow uses [data-testid=file-input] (hidden, use set_input_files with state='attached'), [data-testid=next-to-prefs-button] TWICE to skip step 2, then step 3 has sliders and dates.",
+  "rca of the issue": "weekend_boost=X only multiplies slot_weights[i] for Sat/Sun in allocate_spots_daily (line 534, 540). slot_weights govern which time-of-day is picked first WITHIN a day (sort by -weight). Day selection itself: reach mode uses round-robin across active_day_names; frequency mode iterates active_day_names in order. Neither consults weekend_factor. Result: Sat/Sun receive the same share as if boost=1. Fix option A (minimal): in reach mode, replace round-robin with weighted round-robin where Sat/Sun days are visited weekend_boost times per Mon-Fri visit. Fix option B (cleaner): compute per-day target counts = count * weekend_factor[d] / sum(weekend_factor for all active days), then round; distribute remainder by fractional. Then within each day, pick top-N slots by slot_weights."
+}

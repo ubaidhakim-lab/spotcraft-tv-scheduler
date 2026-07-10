@@ -31,12 +31,16 @@ const DEFAULT_PREFS = {
   campaign_end: new Date(Date.now() + 6 * 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
   campaign_weeks: 6,
   spot_frequency_minutes: 30,
+  movies_frequency_minutes: 60,
+  movies_genres: ["MOV", "Movies", "Movie"],
   gec_genres: ["GEC"],
   gec_planning_weeks: null,
   weekly_grp_dispersion: [20, 20, 18, 15, 15, 12],
   blackout_days: [],
   blackout_dates: [],
   daypart_weights: [],
+  weekend_boost: 1.0,
+  reach_vs_frequency: 0.5,
 };
 
 export default function PlanBuilder() {

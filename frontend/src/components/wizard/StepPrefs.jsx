@@ -298,6 +298,76 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
             })}
           </div>
         </div>
+
+        <div className="mt-6 border-t border-border pt-6">
+          <Label className="overline">Weekend Boost</Label>
+          <p className="text-xs text-muted-foreground mt-1">
+            Multiplier applied to Sat & Sun slots. 1.0x = neutral · &lt;1 = fewer weekend spots · &gt;1 = more.
+          </p>
+          <div className="mt-3 grid grid-cols-12 gap-3 items-center" data-testid="weekend-boost-row">
+            <div className="col-span-2 text-sm text-muted-foreground">Sat / Sun</div>
+            <div className="col-span-8">
+              <Slider
+                value={[prefs.weekend_boost ?? 1]}
+                min={0}
+                max={3}
+                step={0.1}
+                onValueChange={(v) => setKey("weekend_boost", v[0])}
+                data-testid="weekend-boost-slider"
+              />
+            </div>
+            <div className="col-span-2 text-right tabular text-sm font-semibold">
+              {(prefs.weekend_boost ?? 1).toFixed(1)}x
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 border-t border-border pt-6">
+          <div className="flex items-center justify-between">
+            <Label className="overline">Reach ← → Frequency</Label>
+            <span className="tabular text-xs text-muted-foreground">
+              {(prefs.reach_vs_frequency ?? 0.5).toFixed(2)}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            Left = spread spots across days (reach). Right = concentrate on same day (frequency).
+          </p>
+          <div className="mt-3">
+            <Slider
+              value={[prefs.reach_vs_frequency ?? 0.5]}
+              min={0}
+              max={1}
+              step={0.05}
+              onValueChange={(v) => setKey("reach_vs_frequency", v[0])}
+              data-testid="reach-frequency-slider"
+            />
+            <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
+              <span>Max reach</span>
+              <span>Balanced</span>
+              <span>Max frequency</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 border-t border-border pt-6">
+          <Label className="overline">Movies Frequency Override</Label>
+          <p className="text-xs text-muted-foreground mt-1">
+            Spots on movie channels (genre contains "MOV/Movie") use this frequency.
+          </p>
+          <div className="mt-2 flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">1 spot every</span>
+            <Input
+              type="number"
+              min="15"
+              step="15"
+              value={prefs.movies_frequency_minutes ?? 60}
+              onChange={(e) => setKey("movies_frequency_minutes", parseInt(e.target.value || 60))}
+              className="w-24 tabular"
+              data-testid="movies-frequency-input"
+            />
+            <span className="text-sm text-muted-foreground">minutes</span>
+          </div>
+        </div>
       </section>
 
       <section className="bg-white border border-border p-8">
