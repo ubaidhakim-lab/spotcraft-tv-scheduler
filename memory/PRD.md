@@ -25,3 +25,24 @@ Web app for media planners to break an ACD-based media plan into an Edit-wise pl
 - P2: Daypart-weighted scheduling (bias to prime time)
 - P2: Multi-market summary view
 - P2: Save/load plan sessions
+
+## Iteration 2 (Feb 2026)
+Adapted to real-world file formats + 4 enhancements requested by user.
+
+### Real-file support
+- Multi-row header detection (finds row with Program+Channel/Genre)
+- Metadata extraction (Client, Brand, Campaign, Period, TG, Markets)
+- Correctly canonicalizes columns: Nett Rate/10sec, ACD, Spots (not Cal Spts PD), FCT, Net Outlay, Log TVR, GRP, NGRP, CPRP
+- Duplicate column names disambiguated (two "Start Time"/"Days" columns)
+- Output preserves original 40+ column layout PLUS injects Edit, Final Spots, Final FCT, Net Outlay Recomputed, GRP Recomputed columns AND a daily date matrix (Mon-Sun × weeks) with 1s where scheduled AND weekly totals + weekly dispersion %
+
+### Enhancements
+1. Per-row edit override: Step 2 shows all program rows in a table; click "Edit" opens dialog for custom mix per row. Saved overrides shown as blue badge in Mix column.
+2. Learn from sample: Step 1 has "Choose sample" — upload a past output file, backend extracts edit dispersion (by summing spots per edit duration) + weekly dispersion (by summing spots per WK column) and prefills the wizard.
+3. Daypart weighting: Step 3 has 7 sliders (Morning..Overnight) 0-3x; slots at higher-weight dayparts are preferred during allocation.
+4. Save/load sessions: Header has Sessions/Save buttons. Sessions persist in MongoDB with full edits + row_overrides + prefs, load restores plan + all settings.
+
+### Additional UX
+- Front-load and Bell curve preset buttons for weekly dispersion
+- Metadata card in Upload summary shows Client/Brand/Campaign
+- Row 4 stat cards + weekly bar + edit pie + 3 tabs (Edit-wise, Day-wise Schedule, By Channel)

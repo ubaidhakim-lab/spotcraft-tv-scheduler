@@ -183,10 +183,10 @@ export default function StepResults({ result, downloadHref }) {
                       <td>{r.days}</td>
                       <td className="num">{r.edit_duration}s</td>
                       <td className="num">{r.edit_pct}%</td>
-                      <td className="num">{r.edit_fct.toLocaleString()}</td>
-                      <td className="num font-semibold">{r.edit_spots_int}</td>
-                      <td className="num">{r.grp_share.toLocaleString()}</td>
-                      <td className="num">{r.outlay_share.toLocaleString()}</td>
+                      <td className="num">{(r.final_fct || 0).toLocaleString()}</td>
+                      <td className="num font-semibold">{r.final_spots}</td>
+                      <td className="num">{(r.grp || 0).toLocaleString()}</td>
+                      <td className="num">{(r.net_outlay || 0).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
