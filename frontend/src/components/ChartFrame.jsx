@@ -1,33 +1,36 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
 /**
- * Wraps children in a fixed-height div and only mounts them
- * once the container has a measurable non-zero width — avoids
- * Recharts width(-1)/height(-1) console warnings.
+ * Measures the wrapper's clientWidth and passes numeric {width, height}
+ * to the render prop. Renders nothing until width > 0, so charts never
+ * mount with -1 sizes and no Recharts warnings fire.
+ *
+ * Usage:
+ *   <ChartFrame height={256}>
+ *     {({ width, height }) => (
+ *       <BarChart width={width} height={height} data={...}>...</BarChart>
+ *     )}
+ *   </ChartFrame>
  */
 export default function ChartFrame({ height = 256, children, ...rest }) {
   const ref = useRef(null);
-  const [ready, setReady] = useState(false);
+  const [width, setWidth] = useState(0);
 
   useLayoutEffect(() => {
     if (!ref.current) return;
-    if (ref.current.clientWidth > 0) {
-      setReady(true);
-      return;
-    }
-    const ro = new ResizeObserver(([entry]) => {
-      if (entry.contentRect.width > 0) {
-        setReady(true);
-        ro.disconnect();
-      }
-    });
+    const measure = () => {
+      const w = ref.current?.clientWidth || 0;
+      setWidth((prev) => (prev !== w ? w : prev));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
     ro.observe(ref.current);
     return () => ro.disconnect();
   }, []);
 
   return (
     <div ref={ref} style={{ width: "100%", height }} {...rest}>
-      {ready ? children : null}
+      {width > 0 ? children({ width, height }) : null}
     </div>
   );
 }

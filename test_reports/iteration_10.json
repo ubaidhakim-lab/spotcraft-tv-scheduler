@@ -1,0 +1,22 @@
+{
+  "summary": "Iteration 10 retest of Recharts width(-1)/height(-1) warnings after ResponsiveContainer was dropped entirely. ChartFrame now measures wrapper via ResizeObserver and passes numeric width/height directly to BarChart/PieChart via render-prop. RESULT: ZERO width(-1)/height(-1) warnings, ZERO other console errors/warnings during full E2E flow (upload -> prefs -> generate -> Results) and after viewport resize. Charts render correctly (weekly BarChart with 7 week bars W1..W7, edit-wise PieChart with 3 segments + 10/20/30 legend). Download link resolves to /api/results/{id}/download. Primary objective MET.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ChartFrame.jsx fix is correct and minimal: useLayoutEffect + ResizeObserver measure wrapper clientWidth, render children({width,height}) only when width>0. This bypasses ResponsiveContainer entirely and eliminates the Recharts internal -1 warning at its source.",
+    "Minor (non-blocking): ChartFrame uses ref.current.clientWidth but not clientHeight; height is a fixed prop (256). Acceptable for current usage."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100% (E2E OK, 0 console warnings/errors)"},
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "E2E wizard verified: upload /tmp/samples/input.xlsx via [data-testid=file-input] -> [data-testid=next-to-prefs-button] -> fill [data-testid=campaign-start-input]=2026-06-29 and [data-testid=campaign-end-input]=2026-08-16 -> [data-testid=generate-button] -> Results renders both charts with data + working [data-testid=download-link]. Console listener attached from page load through resize: 0 width/height(-1) warnings, 0 other errors/warnings.",
+  "rca of the issue": "Fix verified: dropping ResponsiveContainer removes the component whose internal initial state (containerWidth=-1, containerHeight=-1) emitted the console.warn on first render tick. By passing numeric measured width/height directly to BarChart/PieChart and gating children on width>0, no chart ever mounts with invalid dimensions and no warning is ever emitted."
+}

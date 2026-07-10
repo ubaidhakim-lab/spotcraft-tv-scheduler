@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import ChartFrame from "@/components/ChartFrame";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, Tooltip,
   PieChart, Pie, Cell, Legend, CartesianGrid,
 } from "recharts";
 
@@ -97,23 +97,23 @@ export default function StepResults({ result, downloadHref }) {
         <div className="lg:col-span-2 bg-white border border-border p-6">
           <div className="overline mb-3">Weekly Spot Distribution</div>
           <ChartFrame height={256} data-testid="weekly-chart">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={summary.by_week} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
+            {({ width, height }) => (
+              <BarChart width={width} height={height} data={summary.by_week} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
                 <XAxis dataKey="week" tickFormatter={(v) => `W${v}`} stroke="#52525B" />
                 <YAxis stroke="#52525B" />
                 <Tooltip />
                 <Bar dataKey="spots" fill="#002FA7" radius={[2, 2, 0, 0]} />
               </BarChart>
-            </ResponsiveContainer>
+            )}
           </ChartFrame>
         </div>
 
         <div className="bg-white border border-border p-6">
           <div className="overline mb-3">Edit-wise Split</div>
           <ChartFrame height={256} data-testid="edit-pie">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
+            {({ width, height }) => (
+              <PieChart width={width} height={height}>
                 <Pie
                   data={summary.by_edit}
                   dataKey="spots"
@@ -128,7 +128,7 @@ export default function StepResults({ result, downloadHref }) {
                 <Tooltip />
                 <Legend />
               </PieChart>
-            </ResponsiveContainer>
+            )}
           </ChartFrame>
         </div>
       </div>
