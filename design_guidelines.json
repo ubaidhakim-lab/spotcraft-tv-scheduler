@@ -1,0 +1,136 @@
+{
+  "theme": "light",
+  "typography": {
+    "headings": {
+      "family": "Manrope, sans-serif",
+      "weights": ["800", "700"],
+      "tracking": "tracking-tight",
+      "usage": "Use for all Wizard step titles, dashboard headers, and major sections."
+    },
+    "body": {
+      "family": "'IBM Plex Sans', sans-serif",
+      "weights": ["400", "500", "600"],
+      "tracking": "tracking-normal",
+      "usage": "Use for data tables, form inputs, and general body text for maximum clarity and tabular numeral support."
+    },
+    "rules": [
+      "NEVER use Inter, Roboto, or Open Sans for headings.",
+      "Headings (Size > 32px) MUST use tight letter spacing (tracking-tight).",
+      "Overlines / Labels MUST be Uppercase, text-xs, with wide spacing (tracking-[0.2em]).",
+      "Tabular data MUST use font-variant-numeric: tabular-nums for vertical alignment of numbers."
+    ]
+  },
+  "colors": {
+    "archetype": "Swiss & High-Contrast (Authority, Clarity, Truth)",
+    "palette": {
+      "background": "#F4F5F7",
+      "surface": "#FFFFFF",
+      "primary": "#002FA7",
+      "primary_hover": "#002280",
+      "text_main": "#090A0B",
+      "text_muted": "#52525B",
+      "border": "#E4E4E7",
+      "accent_red": "#E32400",
+      "accent_yellow": "#FFC107",
+      "chart_1": "#002FA7",
+      "chart_2": "#00B4D8",
+      "chart_3": "#90E0EF",
+      "chart_4": "#CAF0F8",
+      "chart_5": "#03045E"
+    },
+    "rules": [
+      "Color is Function Only: 95% of the UI should be monochrome. Color exists only to guide action.",
+      "Use #002FA7 (International Klein Blue) exclusively for primary CTAs and active state indicators.",
+      "Never use pure black or grey. Tint greys slightly cool (blue undertone).",
+      "Hover state color must be a lighter/darker hue of the active state color, explicitly defined.",
+      "Do NOT use teal green or teal blue (#1B93A4) for dashboards."
+    ]
+  },
+  "visual_enhancers": {
+    "surface_strategy": "Grid Borders (The 'Technical' Look)",
+    "cards": "Flat solid background, 1px subtle border (border-border), no shadow by default.",
+    "hover_states": "Cards lift slightly (-translate-y-1) with a subtle shadow (shadow-md) and border color darkens.",
+    "borders": "Sharp edges or subtle roundness (max 8px border-radius). Use border-collapse for grid layouts.",
+    "effects": "Use 1px inner borders to separate surfaces. Avoid muddy gray transparency; no full-screen gradients."
+  },
+  "grids_and_layouts": {
+    "strategy": "High Density Grid (For Dashboards / Analytics)",
+    "base_grid": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4",
+    "gaps": "Tight spacing (gap-4 or gap-6) for data correlation.",
+    "span_logic": {
+      "summary_widgets": "col-span-1",
+      "main_table": "col-span-full",
+      "charts": "col-span-2 row-span-2"
+    },
+    "alignment": "Right-align all numeric data in tables. Left-align text. Center-align only if it improves visual balance.",
+    "spacing_scale": "Use Tailwind p-4, p-6, p-8. Containers with borders MUST have internal padding."
+  },
+  "components": {
+    "tables": {
+      "style": "Efficient, compact design. Sticky headers, hoverable rows (bg-muted/50), right-aligned numeric columns.",
+      "features": "Pagination controls, sticky first column for critical data (e.g., Channel/Program), alternating row colors or subtle bottom borders."
+    },
+    "wizard": {
+      "style": "Horizontal progress indicator showing steps (Upload -> Configure -> Schedule -> View).",
+      "interactions": "Smooth transitions between steps. Clear 'Next' and 'Back' buttons."
+    },
+    "forms": {
+      "style": "Use Shadcn Form, Input, Select. Stacked labels with clear contrast.",
+      "customization": "No native inputs. Use crisp borders, clear focus rings (focus:ring-2 focus:ring-primary)."
+    },
+    "charts": {
+      "library": "recharts (via Shadcn)",
+      "usage": "Bar charts for weekly GRP dispersion, Pie/Donut charts for Edit-wise split."
+    }
+  },
+  "motion": {
+    "rules": [
+      "Minimalist animations. Use micro-interactions for feedback.",
+      "Hover states for all interactive elements (transition: transform 0.2s ease, opacity 0.2s ease).",
+      "Staggered entrance animations for table rows or dashboard widgets.",
+      "Must respect prefers-reduced-motion."
+    ]
+  },
+  "accessibility": {
+    "contrast": "Maintain 4.5:1 ratio for normal text. Use APCA guidelines.",
+    "focus": "High contrast focus states (focus:ring-2 focus:ring-primary focus:outline-none).",
+    "testing": "All interactive elements MUST include data-testid attribute (e.g., data-testid='upload-plan-button').",
+    "aria": "Use aria-hidden='true' for decorative elements."
+  },
+  "media_and_images": {
+    "strategy": "Minimal images. Focus on typography and data clarity.",
+    "image_urls": [
+      {
+        "category": "empty_state",
+        "url": "https://images.unsplash.com/photo-1763718528755-4bca23f82ac3?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzl8MHwxfHNlYXJjaHwzfHxkYXRhJTIwYW5hbHlzaXMlMjBlbXB0eSUyMHN0YXRlfGVufDB8fHx8MTc4MzY4MTcyN3ww&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract data dashboard view, used as a subtle background or illustration for the 'Upload Plan' empty state."
+      }
+    ]
+  },
+  "3d_libraries": {
+    "decision": "Not required for this B2B data-heavy tool.",
+    "alternative": "Use lightweight 2D data visualization (recharts) for maximum performance and clarity."
+  },
+  "instructions_to_main_agent": [
+    "Install required fonts: Manrope and IBM Plex Sans.",
+    "Initialize Shadcn UI and add components: table, form, input, select, button, card, progress, dialog.",
+    "Build a multi-step layout with a fixed sidebar or top wizard progress bar.",
+    "Implement the Drag-and-Drop file upload zone using a dashed border and clear CTA.",
+    "Build the interactive 'Edit Dispersion' form allowing dynamic rows of percentages that must sum to 100%.",
+    "Ensure the complex data table for the 'schedule' output has a horizontal scroll, sticky headers, and right-aligned metrics.",
+    "Use Recharts to show 'Weekly GRP Dispersion' and 'Edit-wise Split'.",
+    "Apply the 'Swiss & High-Contrast' theme: white surfaces, strict borders, pure primary blue for active elements."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "You tend to converge toward generic outputs. Make creative, distinctive frontends.",
+    "Create depth through layered design elements with z-index hierarchy, even in 2D dashboards.",
+    "You MUST NOT apply universal transition (e.g., transition: all). Add transitions for specific interactive elements.",
+    "You MUST NOT center align the app container (.App { text-align: center; }). It disrupts reading flow.",
+    "Always use modern button styles (sharp or max 8px radius) with interaction animations.",
+    "NEVER use AI assistant Emoji characters (🤖🧠💭💡🔮🎯) for icons.",
+    "Every interaction needs micro-animations (hover states, transitions). Static = dead.",
+    "Prioritize using pre-existing components from src/components/ui when applicable.",
+    "Use `sonner` for toast notifications.",
+    "Ensure all interactive elements have kebab-case data-testid attributes."
+  ]
+}
