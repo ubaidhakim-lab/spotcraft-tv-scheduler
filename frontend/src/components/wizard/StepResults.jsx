@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
-import { Download, TrendingUp } from "lucide-react";
+import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import ChartFrame from "@/components/ChartFrame";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, CartesianGrid,
@@ -95,8 +96,8 @@ export default function StepResults({ result, downloadHref }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white border border-border p-6">
           <div className="overline mb-3">Weekly Spot Distribution</div>
-          <div style={{ width: "100%", height: 256 }} data-testid="weekly-chart">
-            <ResponsiveContainer width="100%" height="100%" minWidth={200} minHeight={200}>
+          <ChartFrame height={256} data-testid="weekly-chart">
+            <ResponsiveContainer width="100%" height="100%">
               <BarChart data={summary.by_week} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
                 <XAxis dataKey="week" tickFormatter={(v) => `W${v}`} stroke="#52525B" />
@@ -105,13 +106,13 @@ export default function StepResults({ result, downloadHref }) {
                 <Bar dataKey="spots" fill="#002FA7" radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
-          </div>
+          </ChartFrame>
         </div>
 
         <div className="bg-white border border-border p-6">
           <div className="overline mb-3">Edit-wise Split</div>
-          <div style={{ width: "100%", height: 256 }} data-testid="edit-pie">
-            <ResponsiveContainer width="100%" height="100%" minWidth={200} minHeight={200}>
+          <ChartFrame height={256} data-testid="edit-pie">
+            <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
                   data={summary.by_edit}
@@ -128,7 +129,7 @@ export default function StepResults({ result, downloadHref }) {
                 <Legend />
               </PieChart>
             </ResponsiveContainer>
-          </div>
+          </ChartFrame>
         </div>
       </div>
 

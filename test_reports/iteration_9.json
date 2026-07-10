@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 9 retest of Recharts width(-1)/height(-1) warnings after new ChartFrame (useLayoutEffect + ResizeObserver gate) wrapper. RESULT: warnings NOT eliminated — 4 warnings still fire (2 per chart) on Step 4 first render. End-to-end wizard flow works correctly: upload /tmp/samples/input.xlsx -> next-to-prefs -> campaign dates 2026-06-29..2026-08-16 -> generate-button -> Results page with weekly-chart (7 bars) + edit-pie (3 sectors) + working download-button link.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "StepResults.jsx / ChartFrame.jsx", "issue": "ChartFrame gating (mount ResponsiveContainer only when wrapper clientWidth>0) STILL emits 4x 'The width(-1) and height(-1) of chart should be greater than 0' warnings. Root cause: even after the wrapper is measured, Recharts ResponsiveContainer's own internal state initializes as {containerWidth:-1, containerHeight:-1} and its render logs the warning synchronously BEFORE its internal ResizeObserver reports a size. Gating the parent width does not stop Recharts's own first-tick warning.", "selector": "[data-testid=weekly-chart] / [data-testid=edit-pie]", "priority": "LOW (cosmetic console noise; charts render fine)"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "The ChartFrame fix does NOT stop the warnings. Recharts ResponsiveContainer logs the warning from its OWN render on mount regardless of parent size. Real fixes: (a) drop ResponsiveContainer entirely, measure wrapper via ResizeObserver and pass numeric width/height props directly to <BarChart>/<PieChart>; (b) upgrade recharts to a version where the warning is removed/gated; (c) suppress the warning by wrapping console.warn (not recommended); (d) accept as cosmetic-only — it does not affect functionality.",
+    "Recommended: replace ChartFrame's `ready` gate with a `{width, height}` state pair set from ResizeObserver, and render <BarChart width={width} height={height} ...> and <PieChart width={width} height={height} ...> directly (no ResponsiveContainer). This will fully eliminate the warning."
+  ],
+  "critical_code_review_comments": [
+    "ChartFrame.jsx assumption is incorrect: gating ResponsiveContainer mount on wrapper clientWidth>0 does NOT prevent Recharts's internal warning because Recharts logs during its own first render tick (containerWidth/Height start at -1 in its state). The only reliable way is to bypass ResponsiveContainer and pass numeric width/height to the chart components directly.",
+    "Minor: ChartFrame spreads `...rest` (including `data-testid`) onto the outer <div>, which is fine, but the ResponsiveContainer inside still initializes with width=-1 and warns before its own observer fires."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "80% (E2E flow OK; Recharts warnings persist — primary objective NOT met)"},
+  "seed_data_creation": "",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "E2E wizard: upload /tmp/samples/input.xlsx -> click [data-testid=next-to-prefs-button] -> (NOTE: preset-45-30-20-10 testid does NOT exist on the prefs page; step-edits was skipped in this flow — the preset buttons live under weekly-total controls: reset-weekly-button, frontload-weekly-button, bell-weekly-button. campaign dates directly on prefs page). Fill campaign-start-input=2026-06-29, campaign-end-input=2026-08-16, click generate-button. Results renders both charts with data. Download URL: /api/results/{id}/download works. Warnings: 4x width(-1)/height(-1) still logged.",
+  "rca of the issue": "Recharts <ResponsiveContainer width='100%' height='100%'> initializes its internal state with containerWidth=-1, containerHeight=-1 and executes a console.warn during its FIRST render tick before its internal ResizeObserver callback runs. Gating the PARENT wrapper's mount on clientWidth>0 (as ChartFrame does) merely delays when ResponsiveContainer mounts but does NOT change ResponsiveContainer's own initial internal state — the warning fires on ResponsiveContainer's first render regardless. Mitigation: bypass ResponsiveContainer entirely; measure the wrapper (ResizeObserver) and pass numeric width/height props to <BarChart>/<PieChart> directly."
+}
