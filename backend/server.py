@@ -954,11 +954,11 @@ def build_output_workbook(plan_doc: Dict[str, Any], result_doc: Dict[str, Any]) 
 
     header_row_idx = row
     for w in range(weeks):
-        c_start = len(output_cols) + len(extra_cols) + 1 + w * 7 + 1
+        c_start = len(output_cols) + len(extra_cols) + 1 + w * 7
         ws.cell(row=row, column=c_start, value=f"Wk {w+1}").font = bold
     row += 1
     for i, dt in enumerate(date_cols):
-        col = len(output_cols) + len(extra_cols) + 1 + i + 1
+        col = len(output_cols) + len(extra_cols) + 1 + i
         ws.cell(row=row, column=col, value=DAY_ORDER[dt.weekday()]).font = bold
     row += 1
 

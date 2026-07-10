@@ -1,0 +1,22 @@
+{
+  "summary": "Iteration 13 xlsx alignment bug fix verified. Added pytest coverage for the Wk-banner / Day-name / Date row alignment invariant across 3 campaign start weekdays (Sat 2026-08-01, Mon 2026-06-29, Wed 2026-09-02). All 3 alignment tests pass. Full iteration 11/12 regression suite (10 tests: strict-day, no-slot-dupes, movies-hourly, weekend-boost monotonic, reach/frequency, GEC spread, download) also passes.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration13_alignment.py",
+    "/app/test_reports/pytest/iteration13_results.xml",
+    "/app/test_reports/pytest/iteration13_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is ~1287 lines — consider splitting into modules (scheduling, workbook builder, routes) for maintainability.",
+    "build_output_workbook mixes header row computation, styling, and week banner logic in one large function; extracting a small helper for date/day/wk column geometry would prevent future off-by-one recurrences."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration13_alignment.py"],
+  "success_rate": {"backend": "100%", "frontend": "N/A (backend-only)"},
+  "seed_data_creation": "None — used existing /tmp/samples/input.xlsx",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Alignment invariant is now covered by test_iteration13_alignment.py — for future changes to build_output_workbook, run this file to guard against off-by-one shifts of Wk banner (row header_row-2) or Day-name (row header_row-1) vs Date row (header_row). Header row is located by finding 'Direct/Matrix' in col 1; first date col located by first datetime in header row.",
+  "rca of the issue": "In build_output_workbook, the Wk banner column start had '+ w * 7 + 1' and Day-name column had '+ i + 1', while the Date row correctly used '+ i' (via date_col_start + i). This shifted the header rows one column right of the date row, causing 01-Aug to have a blank day name and Wk 1 to sit above 02-Aug. Fix removed the extra '+ 1' on both lines (server.py L957 and L961). Verified via openpyxl inspection of downloaded xlsx across Saturday/Monday/Wednesday campaign starts."
+}
