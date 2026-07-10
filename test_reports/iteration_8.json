@@ -1,0 +1,25 @@
+{
+  "summary": "Retest of iteration 7 Recharts warnings fix. The inline style width:100%/height:256 fix did NOT resolve the Recharts width(-1)/height(-1) console warnings — 4 warnings still emitted (2 per chart) on first render of Step 4 Results. Charts DO render correctly (14 bars + 3 pie sectors visible) and full end-to-end flow works (upload -> preset 45-30-20-10 -> dates 2026-06-29..2026-08-16 -> Generate -> Results with stat cards + both charts + download-button present).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "StepResults.jsx (weekly-chart & edit-pie ResponsiveContainer)", "issue": "Recharts still logs 4x 'The width(-1) and height(-1) of chart should be greater than 0' warnings on first render despite inline style width:100%/height:256 wrappers. ResponsiveContainer measures 0 on first tick likely because the outer grid parent (.grid grid-cols-1 lg:grid-cols-3) has not yet laid out when Recharts internally measures. minWidth/minHeight props on ResponsiveContainer do not suppress the warning; it fires before the observer resolves.", "selector": "[data-testid=weekly-chart] / [data-testid=edit-pie]", "priority": "LOW (cosmetic console noise; charts render fine)"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "The 'inline style' fix did NOT eliminate Recharts warnings. Options: (a) render ResponsiveContainer only after container ref has a non-zero clientWidth (use useLayoutEffect + state gate); (b) drop ResponsiveContainer and pass explicit numeric width via a ResizeObserver hook; (c) accept warnings as cosmetic (they don't break rendering)."
+  ],
+  "critical_code_review_comments": [
+    "The warning is fired synchronously by Recharts inside ResponsiveContainer before its internal ResizeObserver reports a size. Setting parent style width/height does not help because Recharts reads its own container ref on mount. A proper fix is to conditionally render the chart after measuring the wrapper, e.g. const [w,setW]=useState(0); useLayoutEffect via ref -> setW(ref.current.clientWidth); {w>0 && <ResponsiveContainer ...>}"
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "80% (flow works; warnings persist)"},
+  "seed_data_creation": "",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "End-to-end wizard flow verified working: /tmp/samples/input.xlsx upload -> Continue -> preset 45-30-20-10 -> Continue -> two date inputs filled 2026-06-29 & 2026-08-16 -> generate-button -> Results screen with data-testid weekly-chart (bars render), edit-pie (3 sectors), download-button. Recharts warnings still fire 4 times.",
+  "rca of the issue": "Recharts ResponsiveContainer measures its container synchronously on first render. Even with parent div using inline style width:100%/height:256, the container's own ref reports width=-1/height=-1 before the internal ResizeObserver fires. The minWidth/minHeight props on ResponsiveContainer only affect the fallback rendered size, not suppression of the warning. Mitigation: gate chart mount on a measured non-zero width via useLayoutEffect + ref."
+}

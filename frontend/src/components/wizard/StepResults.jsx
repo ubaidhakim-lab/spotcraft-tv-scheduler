@@ -95,7 +95,7 @@ export default function StepResults({ result, downloadHref }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white border border-border p-6">
           <div className="overline mb-3">Weekly Spot Distribution</div>
-          <div className="h-64" data-testid="weekly-chart">
+          <div style={{ width: "100%", height: 256 }} data-testid="weekly-chart">
             <ResponsiveContainer width="100%" height="100%" minWidth={200} minHeight={200}>
               <BarChart data={summary.by_week} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E4E4E7" />
@@ -110,7 +110,7 @@ export default function StepResults({ result, downloadHref }) {
 
         <div className="bg-white border border-border p-6">
           <div className="overline mb-3">Edit-wise Split</div>
-          <div className="h-64" data-testid="edit-pie">
+          <div style={{ width: "100%", height: 256 }} data-testid="edit-pie">
             <ResponsiveContainer width="100%" height="100%" minWidth={200} minHeight={200}>
               <PieChart>
                 <Pie
