@@ -793,9 +793,15 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
             week_start = schedule_start + timedelta(days=7 * w_idx)
             if week_start > camp_end:
                 break
-            # Global slot uniqueness: share the occupancy across ALL edit sub-rows
-            # for this (channel, program, timeband) so no half-hour is used twice.
-            occ_key = (er.get("channel"), er.get("program"), er.get("start_time"), er.get("end_time"))
+            # Global slot uniqueness: per (channel, program, timeband, edit_duration).
+            # Different edit copies of the same program CAN share the same slot
+            # (multiple copy-lengths in the same commercial break), but two spots
+            # of the SAME edit_duration cannot land on the same (date, time).
+            occ_key = (
+                er.get("channel"), er.get("program"),
+                er.get("start_time"), er.get("end_time"),
+                er.get("edit_duration"),
+            )
             occ = slot_occupancy.setdefault(occ_key, set())
             allocated = allocate_spots_daily(
                 days_list, slot_times, slot_weights, ws_count, week_start,

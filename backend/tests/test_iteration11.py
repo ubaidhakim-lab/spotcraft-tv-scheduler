@@ -133,19 +133,21 @@ class TestStrictDay:
 # ---------- Test 2: No slot duplicates ----------
 class TestNoSlotDupes:
     def test_no_duplicate_slots_per_rowid(self, default_result):
+        # Iteration 14: uniqueness is now per (_row_id, edit_duration, date, time).
+        # Multiple edit copies of the same row may share a (date, time) slot.
         counts = Counter()
         for sr in default_result["schedule_rows"]:
-            counts[(sr["_row_id"], sr["date"], sr["spot_time"])] += 1
+            counts[(sr["_row_id"], sr["edit_duration"], sr["date"], sr["spot_time"])] += 1
         dupes = [k for k, v in counts.items() if v > 1]
         assert not dupes, f"{len(dupes)} duplicate slots, first 5: {dupes[:5]}"
 
     def test_no_duplicate_slots_per_program_timeband(self, uploaded_plan, default_result):
-        # For each (channel, program, start_time, end_time), each (date, time) must be unique
+        # Iteration 14: uniqueness is per (channel, program, timeband, edit_duration).
         rows_map = rows_by_rowid(uploaded_plan)
         occ = defaultdict(Counter)
         for sr in default_result["schedule_rows"]:
             raw = rows_map.get(sr["_row_id"], {})
-            key = (sr["channel"], sr["program"], raw.get("start_time"), raw.get("end_time"))
+            key = (sr["channel"], sr["program"], raw.get("start_time"), raw.get("end_time"), sr["edit_duration"])
             occ[key][(sr["date"], sr["spot_time"])] += 1
         offenders = []
         for k, c in occ.items():

@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 14 fix verified partially. The per-edit-duration occupancy key change is working (1073 slot-groups now correctly shared by multiple edits, same-edit uniqueness intact, no cross-edit double-booking of the same duration). However the PRIMARY acceptance criterion — final_spots == actual scheduled per edit_row with zero drops — FAILS on the full /tmp/samples/input.xlsx run: 650/5616 spots (11.6%) are still dropped, affecting 25 edit_rows (all edit_duration=10). All iteration 11/12/13 regression tests still pass after updating two slot-uniqueness tests to include edit_duration in their keys (intentional new semantic).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/plans/{plan_id}/generate",
+        "issue": "final_spots does not equal actual scheduled count for 25 edit_rows. Example: row_id=0 (KARNA / Zee Kannada) edit_duration=10 has final_spots=44 but only 35 schedule_rows delivered (delta=-9). Total lost=650 spots across the sample. All shortfalls are on the largest-percentage edit (10s @ 60%) for programs whose (channel, program, timeband, days_allowed) capacity across the 7-week campaign is smaller than any single edit's demand. The occ_key fix (adding edit_duration) helps reduce contention but does not eliminate drops because a single edit's requested spots can still exceed the (slot_times x eligible_days) capacity for that program-timeband.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration14_edit_spot_match.py",
+    "/app/test_reports/pytest/iteration14_all.xml",
+    "/app/test_reports/pytest/iteration14_results.xml"
+  ],
+  "action_items": [
+    "Either (a) cap final_spots for each edit_row at the actual schedulable capacity ceil(available_slots_in_campaign_for_program_timeband) BEFORE display so the number the UI shows matches what is scheduled, or (b) redistribute over-cap demand from a saturated edit to other edits of the same row that still have headroom (since different edits can now share slots — a 10s spot at 20:00 does not block a 20s spot at 20:00), or (c) surface the shortfall explicitly in the response as a warnings field so the user knows their percentage split cannot be honored for those programs.",
+    "Re-run test_iteration14_edit_spot_match.py::TestFinalSpotsMatch after fix to confirm zero drops."
+  ],
+  "critical_code_review_comments": [
+    "server.py generate_plan (lines ~748-836) computes final_spots for each edit_row from the row-level n_spots and edit percentage without ever checking whether that per-edit demand fits inside the program-timeband slot capacity — leading to a systematic over-promise for the highest-share edit on constrained programs. Since iteration 14 made occupancy per-edit, a natural fix is to redistribute the shortfall to lower-percentage edits (which now have their own independent slot pools) before commit.",
+    "The main agent's audit line 'requested=3229 scheduled=3229 lost=0' likely used a smaller edits mix or a filtered subset; against the sample's default_edits (60/30/10 for 10s/20s/30s) the loss reproduces every run at ~11.6%.",
+    "server.py is 1293 lines — still worth splitting into scheduling / workbook / routes modules for maintainability (carried over from iteration 13 review)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration14_edit_spot_match.py (new)",
+    "/app/backend/tests/test_iteration11.py (updated slot-uniqueness keys to include edit_duration to reflect iteration 14's intentional new semantic that different edit copies may share a (row, date, time) slot)"
+  ],
+  "success_rate": {"backend": "88% (15/17 tests passing; 2 iteration-14 acceptance tests fail due to real spot-drop bug)", "frontend": "N/A (backend-only)"},
+  "seed_data_creation": "None - used existing /tmp/samples/input.xlsx",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 14 fix (occ_key includes edit_duration) is in place at server.py L800-804 and is behaviorally correct for slot-sharing / uniqueness. But final_spots still exceeds deliverable capacity for 25 edit_rows in the standard sample. Once main agent implements the redistribute-or-cap fix, re-run: pytest /app/backend/tests/test_iteration14_edit_spot_match.py -v. Also run the full regression: pytest /app/backend/tests/test_iteration11.py /app/backend/tests/test_iteration11_boost_monotonic.py /app/backend/tests/test_iteration13_alignment.py -v (currently all passing).",
+  "rca of the issue": "Per-edit spot demand (final_spots) = n_spots * edit_percentage/100 is computed independently of the physical slot capacity a program-timeband has across the campaign window. For programs with narrow day-restrictions (e.g. Mon-Fri single 30-min band, 5 slots/week x 7 weeks = 35 slots), the 60%-share 10s edit's demand (44 for KARNA) exceeds 35 available slots for that edit's own occupancy pool, causing 9 spots to silently drop while the 20s (30% => 22) and 30s (10% => 7) edits both fit within their independent 35-slot pools. Iteration 14 correctly separates the pools but does not rebalance demand across them. Suggested mitigation: after computing final_spots per edit, pre-compute capacity_ceiling = eligible_days * slots_per_day for each (channel, program, timeband); if any edit's demand exceeds ceiling, cap it and reallocate the surplus to sibling edits of the same row that still have headroom."
+}
