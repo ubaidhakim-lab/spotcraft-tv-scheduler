@@ -685,10 +685,54 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
 
     daypart_weight_map = {d.daypart: d.weight for d in prefs.daypart_weights} if prefs.daypart_weights else {}
 
+    # Blackout day-of-week names (e.g. "Sun") — kept alongside blackout_date_set (specific dates)
+    blackout = set(prefs.blackout_days or [])
+
     def is_gec(g):
         return any(k.lower() in str(g or "").lower() for k in prefs.gec_genres)
 
+    def is_movies(g):
+        return any(k.lower() in str(g or "").lower() for k in (prefs.movies_genres or []))
+
     edit_rows: List[Dict[str, Any]] = []
+
+    def compute_edit_capacity(row: Dict, edit_duration: int) -> int:
+        """Max possible spots for this program-timeband-edit given the campaign window.
+
+        capacity = eligible_days_per_week × slots_per_day_at_this_frequency × eligible_weeks
+        minus dates in blackout that would have been active.
+        """
+        days_list = [d for d in parse_days(row.get("days")) if d not in blackout]
+        if not days_list:
+            return 0
+        st = parse_time(row.get("start_time")) or timedelta(hours=6)
+        et = parse_time(row.get("end_time")) or (st + timedelta(hours=1))
+        if et <= st:
+            et = st + timedelta(hours=1)
+        freq = prefs.movies_frequency_minutes if is_movies(row.get("genre")) else prefs.spot_frequency_minutes
+        step = timedelta(minutes=max(5, freq))
+        slots_per_day = 0
+        cur = st
+        while cur < et:
+            slots_per_day += 1
+            cur += step
+        if slots_per_day == 0:
+            slots_per_day = 1
+        eff_weeks = weeks
+        if is_gec(row.get("genre")) and prefs.gec_planning_weeks:
+            eff_weeks = min(weeks, prefs.gec_planning_weeks)
+        # Estimate blackout impact — count blackout dates that fall on allowed days within eligible weeks
+        blk_hits = 0
+        for bd in blackout_date_set:
+            dow = DAY_ORDER[bd.weekday()]
+            if dow not in days_list:
+                continue
+            wk_idx = (bd - schedule_start).days // 7
+            if 0 <= wk_idx < eff_weeks:
+                blk_hits += 1
+        capacity = len(days_list) * slots_per_day * eff_weeks - blk_hits * slots_per_day
+        return max(0, capacity)
+
     for r in doc["parsed_rows"]:
         fct = safe_num(r.get("fct"))
         spots_total = safe_num(r.get("spots"))
@@ -701,13 +745,42 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
             fct = spots_total * acd
 
         row_edits = override_map.get(r["_row_id"], edits_global)
-        # Base per-spot GRP: original GRP / original spots (if any)
         per_spot_grp = (grp_total / spots_total) if spots_total > 0 else 0
 
+        # First pass: compute raw demand + capacity per edit
+        demands = []
+        capacities = []
         for e in row_edits:
             edit_fct = fct * (e.percentage / 100.0)
-            spots = edit_fct / e.duration if e.duration > 0 else 0
-            spots_int = int(round(spots))
+            raw = edit_fct / e.duration if e.duration > 0 else 0
+            demands.append(int(round(raw)))
+            capacities.append(compute_edit_capacity(r, e.duration))
+
+        # Cap each edit at its capacity; try to rebalance any surplus into siblings with headroom
+        capped = [min(demands[i], capacities[i]) for i in range(len(row_edits))]
+        surplus = sum(demands) - sum(capped)
+        if surplus > 0:
+            # Distribute surplus to edits with headroom (in order of largest headroom first)
+            while surplus > 0:
+                headroom = [(capacities[i] - capped[i], i) for i in range(len(row_edits))]
+                headroom = [(h, i) for h, i in headroom if h > 0]
+                if not headroom:
+                    break
+                headroom.sort(reverse=True)
+                added = False
+                for h, i in headroom:
+                    if surplus <= 0:
+                        break
+                    take = min(h, surplus)
+                    capped[i] += take
+                    surplus -= take
+                    added = True
+                if not added:
+                    break
+
+        # Second pass: build edit_rows using capped counts
+        for idx, e in enumerate(row_edits):
+            spots_int = capped[idx]
             final_fct = spots_int * e.duration
             net_outlay = final_fct * (rate_10s / 10.0)
             grp_share = spots_int * per_spot_grp
@@ -736,13 +809,8 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
 
     # -------- Day-wise schedule --------
     schedule_rows: List[Dict[str, Any]] = []
-    blackout = set(prefs.blackout_days or [])
 
-    def is_movies(g):
-        return any(k.lower() in str(g or "").lower() for k in (prefs.movies_genres or []))
-
-    # Global slot occupancy: (channel, program, start_time, end_time) -> set of (date, time)
-    # Prevents 2 spots in the same half-hour band even across edit sub-rows.
+    # Global slot occupancy: per (channel, program, timeband, edit_duration)
     slot_occupancy: Dict[tuple, set] = {}
 
     for er in edit_rows:
@@ -793,15 +861,11 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
             week_start = schedule_start + timedelta(days=7 * w_idx)
             if week_start > camp_end:
                 break
-            # Global slot uniqueness: per (channel, program, timeband, edit_duration).
-            # Different edit copies of the same program CAN share the same slot
-            # (multiple copy-lengths in the same commercial break), but two spots
-            # of the SAME edit_duration cannot land on the same (date, time).
-            occ_key = (
-                er.get("channel"), er.get("program"),
-                er.get("start_time"), er.get("end_time"),
-                er.get("edit_duration"),
-            )
+            # Slot uniqueness scoped to (_row_id, edit_duration). Each input plan
+            # row gets its own slot capacity; different edits of the same row can
+            # share a half-hour (multiple copy lengths in the same commercial break)
+            # but the same edit can't be double-booked on the same (date, time).
+            occ_key = (er.get("_row_id"), er.get("edit_duration"))
             occ = slot_occupancy.setdefault(occ_key, set())
             allocated = allocate_spots_daily(
                 days_list, slot_times, slot_weights, ws_count, week_start,

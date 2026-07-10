@@ -1,0 +1,28 @@
+{
+  "summary": "Iteration 15 retest PASSED. The occupancy-key fix (scoped to (_row_id, edit_duration)) now delivers final_spots == scheduled_count for EVERY edit_row across all tested edit mixes on /tmp/samples/input.xlsx (which contains duplicate rows for Colors Kannada / Gowri Kalyana 10:30-11:00). Adversarial 10s-heavy, 30s-heavy, balanced, single-edit, and per-row-override mixes all show 0 lost spots and 0 mismatches. Same-edit slot uniqueness per (_row_id, edit_duration, date, spot_time) preserved. All regression suites (iter4/5/6/7/11/13/14) still pass.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration14_edit_spot_match.py",
+    "/app/backend/tests/test_iteration15_mix_variants.py",
+    "/app/backend/tests/test_iteration11.py",
+    "/app/test_reports/pytest/iter15_full_final.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py generate_plan: occ_key = (_row_id, edit_duration) is the right scope for duplicate-row support. Consider adding a code comment near the occ_key definition explaining WHY it must be _row_id-scoped (duplicate plan-lines for the same channel/program/timeband each need independent capacity).",
+    "server.py is still >1200 lines — split into scheduling / workbook / routes modules for maintainability (carried over from iterations 13 & 14).",
+    "Pre-existing failure: backend_test.py::TestLearnSample::test_learn_output references missing /tmp/samples/output.xlsx — unrelated to iteration 15, but worth cleaning up (either commit the fixture or remove the test)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration15_mix_variants.py (new — 10s-heavy, 30s-heavy, balanced, single-edit, row_overrides coverage)",
+    "/app/backend/tests/test_iteration14_edit_spot_match.py (replaced obsolete TestChannelProgramTimebandEditUniqueness with TestPerRowIdEditUniqueness reflecting the new duplicate-row semantic)",
+    "/app/backend/tests/test_iteration11.py (relaxed test_no_duplicate_slots_per_program_timeband — duplicate plan-rows may now share the same slot; per-_row_id uniqueness is still enforced by the sibling test)"
+  ],
+  "success_rate": {"backend": "100% (44/44 iter15-relevant tests passing)", "frontend": "N/A (backend-only)"},
+  "seed_data_creation": "None — used existing /tmp/samples/input.xlsx",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 15 fix verified: per-edit-row final_spots exactly matches schedule_rows count across all mixes and with row_overrides. If the user reports schedule mismatches again, first check whether the input contains duplicate plan-lines and whether occ_key in server.py still includes _row_id. Note two pre-existing test files need attention: (1) backend_test.py::TestLearnSample requires /tmp/samples/output.xlsx which does not exist; (2) test_iteration4.py has a deprecated class-scoped instance-method fixture warning.",
+  "rca of the issue": "Root cause (from iter14 investigation) was that the input xlsx has DUPLICATE plan-rows for the same (channel, program, timeband) — e.g. two rows for 'Colors Kannada / Gowri Kalyana (R)/ FTB / 10:30-11:00'. When occ_key was (channel, program, start, end, edit_duration) the second row starved because the first exhausted the slot pool. Fix in server.py generate_plan changed occ_key to (_row_id, edit_duration) so each plan-line has its own independent capacity per edit. Verification: on the sample input, all 5616 requested spots across every edit mix (10-heavy, 30-heavy, balanced, single, with overrides) are now scheduled with zero drops."
+}

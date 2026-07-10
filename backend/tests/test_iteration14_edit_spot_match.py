@@ -153,33 +153,20 @@ class TestMultiEditSlotSharing:
         )
 
 
-# ---------- Test 4: regression - no cross-edit same-edit_duration dupes ----------
-class TestChannelProgramTimebandEditUniqueness:
-    def test_uniqueness_per_channel_program_timeband_edit(
-        self, uploaded_plan, result
-    ):
-        rows_map = {
-            r["_row_id"]: r
-            for r in uploaded_plan.get("rows", [])
-            if r.get("_row_id") is not None
-        }
-        occ = defaultdict(Counter)
+# ---------- Test 4: per-row_id uniqueness (post-iter14 semantic) ----------
+class TestPerRowIdEditUniqueness:
+    """After iter14, occupancy is scoped to (_row_id, edit_duration). Two
+    different plan-rows with the same (channel, program, timeband) intentionally
+    have independent capacity pools and MAY schedule the same (date, time).
+    We only enforce uniqueness per (_row_id, edit_duration, date, spot_time)."""
+
+    def test_uniqueness_per_row_edit_date_time(self, result):
+        counts = Counter()
         for sr in result["schedule_rows"]:
-            raw = rows_map.get(sr["_row_id"], {})
-            key = (
-                sr["channel"],
-                sr["program"],
-                raw.get("start_time"),
-                raw.get("end_time"),
-                sr["edit_duration"],
-            )
-            occ[key][(sr["date"], sr["spot_time"])] += 1
-        offenders = []
-        for k, c in occ.items():
-            for slot, n in c.items():
-                if n > 1:
-                    offenders.append((k, slot, n))
-        assert not offenders, (
-            f"{len(offenders)} same-edit program-timeband dupes. "
-            f"First 5: {offenders[:5]}"
+            counts[
+                (sr["_row_id"], sr["edit_duration"], sr["date"], sr["spot_time"])
+            ] += 1
+        dupes = [(k, v) for k, v in counts.items() if v > 1]
+        assert not dupes, (
+            f"{len(dupes)} same (row_id, edit, date, time) dupes. First 5: {dupes[:5]}"
         )
