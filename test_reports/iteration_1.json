@@ -1,0 +1,26 @@
+{
+  "summary": "End-to-end test of ACD Plan Builder. Backend upload/generate/download all functional. Frontend 4-step wizard completes successfully with correct calculations, GEC frontloading, blackout days, and result rendering.",
+  "tested_scope": ["backend", "frontend", "integration"],
+  "passed": [
+    "POST /api/plans/upload accepts xlsx, returns plan_id + row_count=4 + summary + preview rows",
+    "POST /api/plans/{id}/generate returns 12 edit_rows and 144 schedule_rows with correct math (30s@60% -> 1920 sec / 64 spots, etc.)",
+    "GEC frontloading: with gec_planning_weeks=2, GEC schedule rows only appear in weeks {1,2}",
+    "Blackout days: with blackout_days=['Sun'], 0 schedule rows have day='Sun'",
+    "Percentage sum != 100 returns HTTP 400 with 'Edit percentages must sum to 100 (got 80.0)'",
+    "GET /api/results/{id}/download returns xlsx with 4 sheets: Edit-wise Plan, Day-wise Schedule, Edit Config, Preferences",
+    "Frontend Step 1: file upload via [data-testid=file-input] shows 'Loaded 4 rows from sample_plan.xlsx', auto-advances to Step 2",
+    "Frontend Step 2: total-percentage=100.0%, preset-60-30-10 present, edit rows show FCT/spots (1920s/64, 960s/48, 320s/32)",
+    "Frontend Step 3: campaign-weeks-input, spot-frequency-input, gec-limit-switch, blackout-mon..sun, week-input-1 all functional",
+    "Frontend Step 4: generate-button triggers results view with all 4 stat cards (Total Edit FCT 3,200s / Total Spots 144 / Total GRP 290 / Total Outlay 5,150,000), weekly bar chart (W1-W4), edit pie chart (30s/20s/10s), tab-edit/tab-schedule/tab-channel, filter-input, download-button",
+    "Schedule tab click renders schedule-table"
+  ],
+  "failed": [],
+  "action_items": [],
+  "notes": [
+    "Field name in generate payload is 'prefs' (not 'preferences') - already correct in frontend api.js.",
+    "The Emergent 'Made with Emergent' badge (fixed bottom-right) intercepts clicks on the primary Continue/Generate button in some viewport sizes. Recommend increasing z-index of primary CTA or adding bottom padding. Not blocking - workaround with force click succeeds. Priority: LOW."
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "retest_needed": false,
+  "full_testing_deferred": true
+}
