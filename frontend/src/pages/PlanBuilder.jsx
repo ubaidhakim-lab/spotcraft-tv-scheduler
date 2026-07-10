@@ -209,11 +209,14 @@ export default function PlanBuilder() {
               className="h-8 w-8 bg-primary flex items-center justify-center text-white font-display font-bold"
               data-testid="app-logo"
             >
-              A
+              S
             </div>
             <div>
-              <div className="font-display text-lg font-bold tracking-tight">ACD Plan Builder</div>
-              <div className="overline text-[10px]">Edit-wise Dispersion & Day-wise Scheduling</div>
+              <div className="font-display text-lg font-bold tracking-tight flex items-baseline gap-2" data-testid="app-title">
+                Spotcraft
+                <span className="text-[10px] font-normal tracking-normal text-muted-foreground">by Ubaid Hakim</span>
+              </div>
+              <div className="overline text-[10px]">ACD → Edit-wise Plan · Day-wise Schedule</div>
             </div>
           </div>
           <div className="flex items-center gap-2">

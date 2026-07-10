@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 5 verification: (1) channel order in output preserved from input, (2) edit sub-rows sorted highest-first (45→30→20→10), (3) Spotcraft/Ubaid Hakim branding in header + logo 'S'. All 3 pytest cases pass; frontend E2E flow (upload → edits → dates → generate → results + download) succeeded end-to-end.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Results page", "issues": ["Recharts warnings 'width(-1) and height(-1)' logged in console — chart container renders before layout settles; non-blocking cosmetic issue"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration5.py",
+    "/app/test_reports/pytest/iter5.xml"
+  ],
+  "action_items": [
+    "OPTIONAL/PREVIEW-ONLY: In the preview environment the emergent-main.js script overrides the browser tab title to 'Emergent | Fullstack App'. The index.html source is correct ('Spotcraft — by Ubaid Hakim'). This will only apply in production/deployed builds. No code change required unless product wants a runtime document.title override in App.js.",
+    "Optional: fix Recharts responsive-container size warnings (add explicit min height or aspect prop) — cosmetic only."
+  ],
+  "critical_code_review_comments": [
+    "server.py build_output_workbook correctly derives market_ord/genre_ord/channel_ord from raw_rows iteration order and uses them as stable sort keys — good approach for preserving input ordering.",
+    "Edit sort key uses -int(edit_duration) — correct for descending order. Verified with out-of-order input edits=[10,45,30,20]: all output blocks emit 45,30,20,10.",
+    "server.py is 1156 lines — recommend splitting build_output_workbook and related helpers into a separate module for maintainability (out of scope for this iteration)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration5.py (new)"
+  ],
+  "success_rate": { "backend": "100%", "frontend": "100%" },
+  "seed_data_creation": "None (uses existing /tmp/samples/input.xlsx)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "test_iteration5.py verifies: channel-order-matches-input, edit-durations-descending (uses monotonic chunking to handle repeated (channel,program,row_no) blocks), and regression check for Grand Total + 3 Weekly sections. Uses BASE_URL env with a fallback. Backend endpoints are POST /api/plans/upload, POST /api/plans/{id}/generate, GET /api/results/{id}/download.",
+  "rca of the issue": "N/A — all fixes validated. Root cause of prior iteration bugs were: (a) output used alphabetic sort on channel because sort key didn't reference input row position — fixed by building *_ord dicts from raw_rows enumeration; (b) edits sorted ascending because +int used as key — fixed by using -int for descending."
+}

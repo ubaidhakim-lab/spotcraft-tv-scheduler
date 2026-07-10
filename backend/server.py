@@ -975,14 +975,31 @@ def build_output_workbook(plan_doc: Dict[str, Any], result_doc: Dict[str, Any]) 
             pct = (weekly_grp * 100.0 / row_grp_total) if row_grp_total else 0
             ws.cell(row=target_row, column=grp_pct_start + w, value=round(pct, 2)).font = bold
 
-    # Sort edit_rows and group by market > genre > channel
+    # Preserve input order for market/genre/channel; edits within a row: highest duration first
+    market_ord: Dict[str, int] = {}
+    genre_ord: Dict[str, int] = {}
+    channel_ord: Dict[str, int] = {}
+    for raw in raw_rows:
+        m = str(raw.get("Market") or raw.get("market") or "")
+        g = str(raw.get("Genre") or raw.get("genre") or "")
+        ch = str(raw.get("Channel") or raw.get("channel") or "")
+        if m and m not in market_ord:
+            market_ord[m] = len(market_ord)
+        if g and g not in genre_ord:
+            genre_ord[g] = len(genre_ord)
+        if ch and ch not in channel_ord:
+            channel_ord[ch] = len(channel_ord)
+
     def key_for(er):
+        m = str(er.get("market") or "")
+        g = str(er.get("genre") or "")
+        ch = str(er.get("channel") or "")
         return (
-            str(er.get("market") or ""),
-            str(er.get("genre") or ""),
-            str(er.get("channel") or ""),
+            market_ord.get(m, 10_000),
+            genre_ord.get(g, 10_000),
+            channel_ord.get(ch, 10_000),
             er.get("_row_id", 0),
-            er.get("edit_duration", 0),
+            -int(er.get("edit_duration", 0)),  # highest edit first
         )
     sorted_edits = sorted(edit_rows, key=key_for)
 
