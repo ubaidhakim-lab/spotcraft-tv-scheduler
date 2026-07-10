@@ -54,6 +54,7 @@ export default function PlanBuilder() {
 
   useEffect(() => {
     listSessions().then(setSessions).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onUpload = async (file) => {

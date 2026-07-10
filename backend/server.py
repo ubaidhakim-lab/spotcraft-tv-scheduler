@@ -293,7 +293,7 @@ def read_workbook(content: bytes):
             continue
         # skip subtotal/summary rows: if col1 or col-first non-null contains "Total"
         first_text = next((str(v) for v in vals if v is not None), "")
-        if "total" in first_text.lower() and first_text.lower().startswith("total") is False and "kar" not in first_text.lower():
+        if "total" in first_text.lower() and not first_text.lower().startswith("total") and "kar" not in first_text.lower():
             # Heuristic: row where any column value contains 'Total' alone
             joined = " ".join(str(v) for v in vals if v is not None)
             if joined.strip().endswith("Total") or " Total " in joined:
@@ -353,8 +353,10 @@ async def upload_plan(file: UploadFile = File(...)):
     content = await file.read()
     try:
         parsed = read_workbook(content)
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}") from e
 
     plan_id = str(uuid.uuid4())
     doc = {

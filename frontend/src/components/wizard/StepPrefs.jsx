@@ -22,15 +22,15 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
   const weeks = Math.max(1, prefs.campaign_weeks || 1);
 
   useEffect(() => {
-    if (prefs.weekly_grp_dispersion.length !== weeks) {
+    setPrefs((p) => {
+      if (p.weekly_grp_dispersion.length === weeks) return p;
       const base = 100 / weeks;
-      setPrefs({
-        ...prefs,
+      return {
+        ...p,
         weekly_grp_dispersion: Array.from({ length: weeks }, () => Number(base.toFixed(2))),
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weeks]);
+      };
+    });
+  }, [weeks, setPrefs]);
 
   const setWeek = (i, val) => {
     const arr = [...prefs.weekly_grp_dispersion];
