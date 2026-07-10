@@ -485,13 +485,15 @@ def apply_daypart_weights(slot_times: List[timedelta], weights: Dict[str, float]
         return [1.0] * len(slot_times)
     return [x / total * len(slot_times) for x in out]
 
-def allocate_spots_daily(days_list: List[str], slot_times: List[timedelta], slot_weights: List[float], count: int, week_start: date, blackout_dates: set = None, campaign_end: Optional[date] = None):
+def allocate_spots_daily(days_list: List[str], slot_times: List[timedelta], slot_weights: List[float], count: int, week_start: date, blackout_dates: set = None, campaign_end: Optional[date] = None, week_index: int = 0):
     """Return list of (day_name, date, timedelta) for scheduled spots.
 
     week_start is the first calendar date of this week (may be any day-of-week).
     days_list is the list of allowed day-of-week names (e.g. ['Mon','Tue']).
     blackout_dates is an optional set of `date` objects to exclude.
     campaign_end caps the schedule strictly — no spot on a date > campaign_end.
+    week_index rotates the starting day within the allowed set so allocation is
+    balanced across all valid days over the campaign.
     """
     blackout_dates = blackout_dates or set()
     # Build up to 7 dates of this week; skip dates beyond campaign_end
@@ -503,9 +505,15 @@ def allocate_spots_daily(days_list: List[str], slot_times: List[timedelta], slot
         dow = DAY_ORDER[d.weekday()]
         if dow in days_list and d not in blackout_dates and dow not in day_dates:
             day_dates[dow] = d
+    if not day_dates:
+        return []
+    # Rotate the day order per week so spots don't always start on the first allowed day
     active_day_names = [d for d in days_list if d in day_dates]
     if not active_day_names:
         return []
+    if len(active_day_names) > 1:
+        off = week_index % len(active_day_names)
+        active_day_names = active_day_names[off:] + active_day_names[:off]
     # Build weighted pool per day
     by_day: Dict[str, List] = {d: [] for d in active_day_names}
     for d in active_day_names:
@@ -689,7 +697,7 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
             week_start = schedule_start + timedelta(days=7 * w_idx)
             if week_start > camp_end:
                 break
-            allocated = allocate_spots_daily(days_list, slot_times, slot_weights, ws_count, week_start, blackout_date_set, camp_end)
+            allocated = allocate_spots_daily(days_list, slot_times, slot_weights, ws_count, week_start, blackout_date_set, camp_end, week_index=w_idx)
             for (d, d_date, t) in allocated:
                 schedule_rows.append({
                     "_row_id": er["_row_id"],

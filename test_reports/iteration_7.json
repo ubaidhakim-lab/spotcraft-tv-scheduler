@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 7 backend fix (day-of-week rotation) fully verified. 32/32 backend pytest tests pass, including 5 new iter7 tests: day-membership correctness, balanced distribution across Mon-Sun / Mon-Sat, week-rotation sanity, campaign_end strict, and blackout regression. Frontend Recharts warnings NOT fully eliminated: 4 'width(-1) height(-1)' warnings still appear on Step 4 Results despite minWidth={200} minHeight={200} being present in both ResponsiveContainer instances in StepResults.jsx.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Step 4 - Review & Export (StepResults)",
+        "issues": [
+          "Recharts still logs 4 'width(-1) and height(-1) of chart should be greater than 0' warnings on first render of the Weekly GRP BarChart and Edit-Mix PieChart. minWidth={200} minHeight={200} is set on both ResponsiveContainer instances but warnings persist. Warnings are cosmetic (charts render correctly) but the iteration-7 acceptance criterion of ZERO Recharts warnings is not met."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration7.py",
+    "/app/test_reports/pytest/iter7.xml"
+  ],
+  "action_items": [
+    "Recharts warnings persist even with minWidth/minHeight props. Likely cause: parent grid cell has width:0 at first render tick before layout resolves. Consider wrapping ResponsiveContainer in a fixed-height div (e.g., style={{width:'100%', height: 260}}) instead of / in addition to relying on ResponsiveContainer's percentage sizing, OR set explicit width={undefined} and use aspect ratio. Alternatively, upgrade recharts or gate render behind a useEffect after mount."
+  ],
+  "critical_code_review_comments": [
+    "allocate_spots_daily rotation logic in /app/backend/server.py (lines 511-516) is correct: rotates active_day_names by (week_index % len(active_day_names)) — verified against sample plan for Mon-Fri, Mon-Sat, Mon-Sun, and Sat-Sun programs.",
+    "server.py exceeds ~1170 lines; recommend splitting scheduling logic into a dedicated module for maintainability (non-blocking)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration7.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "90% (charts render; only cosmetic Recharts console warnings remain)"},
+  "test_credentials": "N/A - no auth required",
+  "seed_data_creation": "None. Reused /tmp/samples/input.xlsx (46 real program rows).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "test_iteration7.py provides regression coverage for day-membership + week rotation. Run full suite via: pytest /app/backend/tests/ -v. Frontend flow to reproduce Recharts warnings: upload /tmp/samples/input.xlsx via file input, click Continue then Generate; on Step 4 charts render but console shows 4 width(-1)/height(-1) warnings from recharts.",
+  "rca of the issue": "For Recharts warning: ResponsiveContainer at first render measures parent width/height as -1 before ResizeObserver fires. Adding minWidth/minHeight props is a hint but Recharts still logs the initial-frame warning. Robust fix: give the immediate parent (or the ResponsiveContainer wrapper div) an explicit fixed pixel height (e.g., h-64 = 256px) instead of h-full inside a grid where the row-height is not yet computed. Backend rotation bug has been correctly resolved."
+}
