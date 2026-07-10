@@ -506,11 +506,16 @@ def allocate_spots_daily(
     weekend_boost: float = 1.0,
     reach_vs_frequency: float = 0.5,
     used_slots: Optional[set] = None,
+    rotation_seed: int = 0,
 ):
     """Return list of (day_name, date, timedelta) for scheduled spots.
 
     Never places a spot on a day-of-week outside days_list, past campaign_end,
     on a blackout_date, or on a (date, time) already present in used_slots.
+
+    `rotation_seed` is a stable offset used to rotate the day-of-week ordering
+    per (row, edit) so that multiple edits within the same week don't all
+    front-load onto Monday when counts-per-day are small.
     """
     blackout_dates = blackout_dates or set()
     used_slots = used_slots if used_slots is not None else set()
@@ -529,9 +534,12 @@ def allocate_spots_daily(
     active_day_names = [d for d in days_list if d in day_dates]
     if not active_day_names:
         return []
-    # Rotate start-of-week to balance across all valid days over the campaign
+    # Rotate start-of-week to balance across all valid days over the campaign.
+    # Combine week_index with rotation_seed so different (row, edit) pairs
+    # start on different days within the same week — this prevents small
+    # counts from all piling onto Monday.
     if len(active_day_names) > 1:
-        off = week_index % len(active_day_names)
+        off = (week_index + rotation_seed) % len(active_day_names)
         active_day_names = active_day_names[off:] + active_day_names[:off]
     # Apply weekend boost to slot_weights per day (Sat/Sun weighted differently)
     weekend_factor: Dict[str, float] = {}
@@ -867,6 +875,10 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
             # but the same edit can't be double-booked on the same (date, time).
             occ_key = (er.get("_row_id"), er.get("edit_duration"))
             occ = slot_occupancy.setdefault(occ_key, set())
+            # Rotation seed per (row, edit) so multiple edits in the same
+            # week don't all start on Monday. Using row_id + edit_duration//5
+            # gives 30s/20s/10s edits different starting-day offsets.
+            rot_seed = int(er.get("_row_id", 0)) + int(er.get("edit_duration", 30)) // 5
             allocated = allocate_spots_daily(
                 days_list, slot_times, slot_weights, ws_count, week_start,
                 blackout_date_set, camp_end,
@@ -874,6 +886,7 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
                 weekend_boost=float(prefs.weekend_boost or 1.0),
                 reach_vs_frequency=float(prefs.reach_vs_frequency if prefs.reach_vs_frequency is not None else 0.5),
                 used_slots=occ,
+                rotation_seed=rot_seed,
             )
             for (d, d_date, t) in allocated:
                 actual_dow = DAY_ORDER[d_date.weekday()]
