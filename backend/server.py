@@ -540,53 +540,90 @@ def allocate_spots_daily(
             by_day[d].append((slot_weights[i] * wf, t, day_dates[d]))
         by_day[d].sort(key=lambda x: (-x[0], x[1]))
     allocated = []
-    # Normalize slot key: always (date, "HH:MM" string). Callers use format_time too.
     used: set = set(used_slots)
 
     def _slot_key(dt, t):
         return (dt, format_time(t))
 
+    # Compute per-day target quotas proportional to weekend_factor weights.
+    # This is how weekend_boost actually shifts spot distribution across days.
+    day_weight = {d: weekend_factor[d] for d in active_day_names}
+    total_w = sum(day_weight.values())
+    if total_w <= 0:
+        total_w = float(len(active_day_names))
+    raw_quota = {d: count * day_weight[d] / total_w for d in active_day_names}
+    day_quota = {d: int(raw_quota[d]) for d in active_day_names}
+    remainder = count - sum(day_quota.values())
+    frac_order = sorted(
+        active_day_names, key=lambda d: (-(raw_quota[d] - day_quota[d]), -day_weight[d])
+    )
+    for k in range(remainder):
+        day_quota[frac_order[k % len(frac_order)]] += 1
+
+    def _try_pick_from_day(d):
+        """Pop the next free slot for day d, honoring `used`. Return (t, dt) or None."""
+        while by_day[d]:
+            w, t, dt = by_day[d].pop(0)
+            if _slot_key(dt, t) not in used:
+                return (t, dt)
+        return None
+
     if reach_vs_frequency <= 0.5:
-        # Reach mode: round-robin across days
-        di = 0
-        active = [d for d in active_day_names if by_day[d]]
-        while count > 0 and active:
-            d = active[di % len(active)]
-            popped = None
-            while by_day[d]:
-                w, t, dt = by_day[d].pop(0)
-                if _slot_key(dt, t) not in used:
-                    popped = (w, t, dt)
-                    break
-            if popped is None:
-                # exhausted
-                active = [x for x in active if by_day[x]]
-                if not active:
-                    break
-                di = 0
-                continue
-            _, t, dt = popped
-            allocated.append((d, dt, t))
-            used.add(_slot_key(dt, t))
-            count -= 1
-            di += 1
-            if not by_day[d]:
-                active = [x for x in active if by_day[x]]
-                di = 0
-    else:
-        # Frequency mode: fill each day before moving to next
-        for d in active_day_names:
-            while count > 0 and by_day[d]:
-                w, t, dt = by_day[d].pop(0)
-                if _slot_key(dt, t) in used:
+        # Reach mode: round-robin across days, but each day capped at its quota
+        remaining = dict(day_quota)
+        # Weighted round-robin: visit each day proportional to remaining quota
+        while sum(remaining.values()) > 0:
+            picked_any = False
+            for d in active_day_names:
+                if remaining[d] <= 0 or not by_day[d]:
                     continue
+                pick = _try_pick_from_day(d)
+                if pick is None:
+                    remaining[d] = 0
+                    continue
+                t, dt = pick
                 allocated.append((d, dt, t))
                 used.add(_slot_key(dt, t))
-                count -= 1
-            if count <= 0:
+                remaining[d] -= 1
+                picked_any = True
+            if not picked_any:
+                break
+    else:
+        # Frequency mode: fill each day (heaviest-weight first) up to its quota
+        order = sorted(active_day_names, key=lambda d: -day_weight[d])
+        for d in order:
+            need = day_quota[d]
+            while need > 0:
+                pick = _try_pick_from_day(d)
+                if pick is None:
+                    break
+                t, dt = pick
+                allocated.append((d, dt, t))
+                used.add(_slot_key(dt, t))
+                need -= 1
+
+    # If quotas dropped spots (day ran out of slots but had remaining quota),
+    # rebalance the leftover to any other day with slots.
+    shortfall = count - len(allocated)
+    if shortfall > 0:
+        pool = [d for d in active_day_names if by_day[d]]
+        while shortfall > 0 and pool:
+            progressed = False
+            for d in list(pool):
+                pick = _try_pick_from_day(d)
+                if pick is None:
+                    pool.remove(d)
+                    continue
+                t, dt = pick
+                allocated.append((d, dt, t))
+                used.add(_slot_key(dt, t))
+                shortfall -= 1
+                progressed = True
+                if shortfall == 0:
+                    break
+            if not progressed:
                 break
 
-    # No reuse-fallback: overflow spots are dropped rather than double-book a slot.
     return allocated
 
 @api_router.post("/plans/{plan_id}/generate")
