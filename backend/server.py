@@ -485,18 +485,21 @@ def apply_daypart_weights(slot_times: List[timedelta], weights: Dict[str, float]
         return [1.0] * len(slot_times)
     return [x / total * len(slot_times) for x in out]
 
-def allocate_spots_daily(days_list: List[str], slot_times: List[timedelta], slot_weights: List[float], count: int, week_start: date, blackout_dates: set = None):
+def allocate_spots_daily(days_list: List[str], slot_times: List[timedelta], slot_weights: List[float], count: int, week_start: date, blackout_dates: set = None, campaign_end: Optional[date] = None):
     """Return list of (day_name, date, timedelta) for scheduled spots.
 
     week_start is the first calendar date of this week (may be any day-of-week).
     days_list is the list of allowed day-of-week names (e.g. ['Mon','Tue']).
     blackout_dates is an optional set of `date` objects to exclude.
+    campaign_end caps the schedule strictly — no spot on a date > campaign_end.
     """
     blackout_dates = blackout_dates or set()
-    # Build the 7 dates of this week and filter to allowed day-of-week + not blackout
+    # Build up to 7 dates of this week; skip dates beyond campaign_end
     day_dates: Dict[str, date] = {}
     for i in range(7):
         d = week_start + timedelta(days=i)
+        if campaign_end and d > campaign_end:
+            break
         dow = DAY_ORDER[d.weekday()]
         if dow in days_list and d not in blackout_dates and dow not in day_dates:
             day_dates[dow] = d
@@ -684,7 +687,9 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
             if ws_count <= 0:
                 continue
             week_start = schedule_start + timedelta(days=7 * w_idx)
-            allocated = allocate_spots_daily(days_list, slot_times, slot_weights, ws_count, week_start, blackout_date_set)
+            if week_start > camp_end:
+                break
+            allocated = allocate_spots_daily(days_list, slot_times, slot_weights, ws_count, week_start, blackout_date_set, camp_end)
             for (d, d_date, t) in allocated:
                 schedule_rows.append({
                     "_row_id": er["_row_id"],
@@ -785,7 +790,8 @@ def build_output_workbook(plan_doc: Dict[str, Any], result_doc: Dict[str, Any]) 
     schedule_rows = result_doc["schedule_rows"]
     prefs = result_doc["prefs"]
     camp_start = datetime.fromisoformat(result_doc.get("campaign_start", result_doc["campaign_start_monday"])).date()
-    # Determine weeks from prefs or dates
+    # Determine weeks + hard end date; the schedule stops exactly on campaign_end (last week may be short)
+    camp_end: Optional[date] = None
     if prefs.get("campaign_end"):
         try:
             camp_end = datetime.strptime(prefs["campaign_end"], "%Y-%m-%d").date()
@@ -795,6 +801,10 @@ def build_output_workbook(plan_doc: Dict[str, Any], result_doc: Dict[str, Any]) 
             weeks = int(prefs.get("campaign_weeks", 6))
     else:
         weeks = int(prefs.get("campaign_weeks", 6))
+    if camp_end is None:
+        camp_end = camp_start + timedelta(days=weeks * 7 - 1)
+    # Total days is bounded by campaign_end (last week may be partial)
+    n_days = (camp_end - camp_start).days + 1
 
     # Styling
     bold = Font(bold=True)
@@ -815,7 +825,6 @@ def build_output_workbook(plan_doc: Dict[str, Any], result_doc: Dict[str, Any]) 
 
     output_cols = list(columns)
     extra_cols = ["Edit", "Final Spots", "Final FCT", "Net Outlay Recomputed", "GRP Recomputed"]
-    n_days = weeks * 7
     date_cols = [(camp_start + timedelta(days=i)) for i in range(n_days)]
     week_summary_start_label = "Weekly Spots"
     week_disp_label = "Weekly Spot Dispersion"
