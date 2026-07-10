@@ -54,3 +54,10 @@ Adapted to real-world file formats + 4 enhancements requested by user.
 - Verified via `/tmp/gen_test_plan.py` and `/tmp/stress_test.py` + testing_agent iteration 16 (13/14 pass; the only miss is an aggregate-evenness soft target).
 
 Invariant guaranteed: `len(schedule_rows) == sum(er.final_spots for er in edit_rows)` for every generated plan.
+
+## 2026-02 Update: Channel Spots-per-Day (replaces Daypart Weighting + Blackout Days)
+- Removed from Step 3 UI: Daypart Weighting sliders, Blackout days (day-of-week) toggle group.
+- Added `SchedulingPrefs.channel_spots_per_day: List[ChannelSpotsPerDay]` on backend.
+- Added Step 3 section: "Average Spots per Day" — dynamically groups channels by genre from the uploaded plan (GEC / Movies / News / Music / etc). Each channel has a spots/day input. Each genre has a bulk "Apply to all" input. Live counter + clear-all button.
+- Backend derivation: `needed_days = ceil(channel_total_spots / spots_per_day)` → `needed_weeks = ceil(needed_days / 7)` → this caps that channel's `eff_weeks` (combines with `gec_planning_weeks` via `min()`).
+- Verified: Star Plus 280 spots @ 10/day → runs exactly 28 days at 10/day. Sony Max 60 spots @ 5/day → runs 14 days. No-drop invariant still holds. Testing iteration 17 = 100% pass on new tests.
