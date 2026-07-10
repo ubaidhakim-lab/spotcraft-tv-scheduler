@@ -41,12 +41,14 @@ class DaypartWeight(BaseModel):
 
 class SchedulingPrefs(BaseModel):
     campaign_start: str
+    campaign_end: Optional[str] = None  # YYYY-MM-DD; if omitted, campaign_weeks is used
     campaign_weeks: int = 6
     spot_frequency_minutes: int = 30
     gec_genres: List[str] = ["GEC"]
     gec_planning_weeks: Optional[int] = None
     weekly_grp_dispersion: List[float] = []
     blackout_days: List[str] = []
+    blackout_dates: List[str] = []  # ISO date strings YYYY-MM-DD (frontend converts from DD-MM-YY)
     daypart_weights: List[DaypartWeight] = []
 
 class GenerateRequest(BaseModel):
@@ -322,8 +324,14 @@ def read_workbook(content: bytes):
         # require at least channel or program
         if not pr.get("channel") and not pr.get("program"):
             continue
-        # skip if program value contains "Total"
-        if pr.get("program") and "total" in str(pr["program"]).lower():
+        # skip subtotal rows: Program, Channel, or Genre value contains "Total" (case-insensitive)
+        subtotal_hit = False
+        for key in ("program", "channel", "genre", "market"):
+            v = pr.get(key)
+            if v and "total" in str(v).lower():
+                subtotal_hit = True
+                break
+        if subtotal_hit:
             continue
         filtered.append(pr)
         filtered_raw.append(raw_rows[i])
@@ -477,39 +485,45 @@ def apply_daypart_weights(slot_times: List[timedelta], weights: Dict[str, float]
         return [1.0] * len(slot_times)
     return [x / total * len(slot_times) for x in out]
 
-def allocate_spots_daily(days_list: List[str], slot_times: List[timedelta], slot_weights: List[float], count: int, week_start: date):
-    """Return list of (day_name, date, timedelta) for scheduled spots."""
-    # For each day, generate weighted slot list
-    day_dates = {d: week_start + timedelta(days=DAY_ORDER.index(d)) for d in days_list}
-    # Build weighted pool of (day, date, time, weight)
-    pool = []
-    for d in days_list:
-        for i, t in enumerate(slot_times):
-            pool.append((d, day_dates[d], t, slot_weights[i]))
-    if not pool:
+def allocate_spots_daily(days_list: List[str], slot_times: List[timedelta], slot_weights: List[float], count: int, week_start: date, blackout_dates: set = None):
+    """Return list of (day_name, date, timedelta) for scheduled spots.
+
+    week_start is the first calendar date of this week (may be any day-of-week).
+    days_list is the list of allowed day-of-week names (e.g. ['Mon','Tue']).
+    blackout_dates is an optional set of `date` objects to exclude.
+    """
+    blackout_dates = blackout_dates or set()
+    # Build the 7 dates of this week and filter to allowed day-of-week + not blackout
+    day_dates: Dict[str, date] = {}
+    for i in range(7):
+        d = week_start + timedelta(days=i)
+        dow = DAY_ORDER[d.weekday()]
+        if dow in days_list and d not in blackout_dates and dow not in day_dates:
+            day_dates[dow] = d
+    active_day_names = [d for d in days_list if d in day_dates]
+    if not active_day_names:
         return []
-    # Simple round-robin across days, and within a day pick highest-weight slots first
-    by_day = {d: [] for d in days_list}
-    for d, dt, t, w in pool:
-        by_day[d].append((w, t, dt))
-    for d in by_day:
+    # Build weighted pool per day
+    by_day: Dict[str, List] = {d: [] for d in active_day_names}
+    for d in active_day_names:
+        for i, t in enumerate(slot_times):
+            by_day[d].append((slot_weights[i], t, day_dates[d]))
         by_day[d].sort(key=lambda x: (-x[0], x[1]))
     allocated = []
-    # round-robin day loop; if a day exhausted, remove
     di = 0
-    active_days = [d for d in days_list if by_day[d]]
-    while count > 0 and active_days:
-        d = active_days[di % len(active_days)]
+    active = [d for d in active_day_names if by_day[d]]
+    while count > 0 and active:
+        d = active[di % len(active)]
         w, t, dt = by_day[d].pop(0)
         allocated.append((d, dt, t))
         count -= 1
         di += 1
         if not by_day[d]:
-            active_days = [x for x in active_days if by_day[x]]
+            active = [x for x in active if by_day[x]]
             di = 0
-    # If we still have spots remaining and no slots left, cycle back
+    # If still remaining (no slots left) reuse first day/slot
     while count > 0:
-        d = days_list[0]
+        d = active_day_names[0]
         allocated.append((d, day_dates[d], slot_times[0]))
         count -= 1
     return allocated
@@ -537,17 +551,39 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
     try:
         camp_start = datetime.strptime(prefs.campaign_start, "%Y-%m-%d").date()
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid campaign_start (YYYY-MM-DD)")
-    # Align to Monday of that week for cleaner weekly grouping
-    camp_start_monday = camp_start - timedelta(days=camp_start.weekday())
+        raise HTTPException(status_code=400, detail="Invalid campaign_start (YYYY-MM-DD)") from None
 
-    weeks = max(1, int(prefs.campaign_weeks))
+    # Determine weeks: prefer explicit end date, else campaign_weeks
+    if prefs.campaign_end:
+        try:
+            camp_end = datetime.strptime(prefs.campaign_end, "%Y-%m-%d").date()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid campaign_end (YYYY-MM-DD)") from None
+        if camp_end < camp_start:
+            raise HTTPException(status_code=400, detail="campaign_end must be on or after campaign_start")
+        total_days = (camp_end - camp_start).days + 1
+        weeks = max(1, math.ceil(total_days / 7))
+    else:
+        weeks = max(1, int(prefs.campaign_weeks))
+        camp_end = camp_start + timedelta(days=weeks * 7 - 1)
+
+    # Weeks start on campaign_start date (no Monday alignment)
+    schedule_start = camp_start
+
     if prefs.weekly_grp_dispersion and len(prefs.weekly_grp_dispersion) == weeks:
         wk_disp = prefs.weekly_grp_dispersion[:]
     else:
         wk_disp = [100.0 / weeks] * weeks
     ws_sum = sum(wk_disp)
     wk_disp = [w * 100.0 / ws_sum if ws_sum else 0 for w in wk_disp]
+
+    # Parse blackout dates (ISO YYYY-MM-DD)
+    blackout_date_set = set()
+    for ds in (prefs.blackout_dates or []):
+        try:
+            blackout_date_set.add(datetime.strptime(ds, "%Y-%m-%d").date())
+        except Exception:
+            continue
 
     daypart_weight_map = {d.daypart: d.weight for d in prefs.daypart_weights} if prefs.daypart_weights else {}
 
@@ -647,8 +683,8 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
         for w_idx, ws_count in enumerate(week_spots):
             if ws_count <= 0:
                 continue
-            week_start = camp_start_monday + timedelta(days=7 * w_idx)
-            allocated = allocate_spots_daily(days_list, slot_times, slot_weights, ws_count, week_start)
+            week_start = schedule_start + timedelta(days=7 * w_idx)
+            allocated = allocate_spots_daily(days_list, slot_times, slot_weights, ws_count, week_start, blackout_date_set)
             for (d, d_date, t) in allocated:
                 schedule_rows.append({
                     "_row_id": er["_row_id"],
@@ -673,7 +709,7 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
         "edits": [e.model_dump() for e in edits_global],
         "row_overrides": [ov.model_dump() for ov in req.row_overrides],
         "prefs": prefs.model_dump(),
-        "campaign_start_monday": camp_start_monday.isoformat(),
+        "campaign_start_monday": schedule_start.isoformat(),
         "edit_rows": edit_rows,
         "schedule_rows": schedule_rows,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -720,7 +756,9 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
         "result_id": result_id,
         "edit_rows": edit_rows,
         "schedule_rows": schedule_rows,
-        "campaign_start_monday": camp_start_monday.isoformat(),
+        "campaign_start_monday": schedule_start.isoformat(),
+        "campaign_start": schedule_start.isoformat(),
+        "campaign_end": camp_end.isoformat(),
         "summary": {
             "total_edit_fct": round(total_edit_fct, 2),
             "total_edit_spots": total_edit_spots,
@@ -746,13 +784,25 @@ def build_output_workbook(plan_doc: Dict[str, Any], result_doc: Dict[str, Any]) 
     edit_rows = result_doc["edit_rows"]
     schedule_rows = result_doc["schedule_rows"]
     prefs = result_doc["prefs"]
-    weeks = int(prefs.get("campaign_weeks", 6))
-    camp_start = datetime.fromisoformat(result_doc["campaign_start_monday"]).date()
+    camp_start = datetime.fromisoformat(result_doc.get("campaign_start", result_doc["campaign_start_monday"])).date()
+    # Determine weeks from prefs or dates
+    if prefs.get("campaign_end"):
+        try:
+            camp_end = datetime.strptime(prefs["campaign_end"], "%Y-%m-%d").date()
+            total_days = (camp_end - camp_start).days + 1
+            weeks = max(1, math.ceil(total_days / 7))
+        except Exception:
+            weeks = int(prefs.get("campaign_weeks", 6))
+    else:
+        weeks = int(prefs.get("campaign_weeks", 6))
 
     # Styling
     bold = Font(bold=True)
     header_fill = PatternFill("solid", fgColor="002FA7")
     header_font = Font(bold=True, color="FFFFFF")
+    subtotal_fill = PatternFill("solid", fgColor="E8F0FE")
+    grand_fill = PatternFill("solid", fgColor="002FA7")
+    grand_font = Font(bold=True, color="FFFFFF")
     center = Alignment(horizontal="center", vertical="center")
 
     # Metadata rows
@@ -763,30 +813,24 @@ def build_output_workbook(plan_doc: Dict[str, Any], result_doc: Dict[str, Any]) 
         row += 1
     row += 1  # gap
 
-    # Determine columns to write in the header
-    # Insert "Edit", "Final Spots", "Final FCT", "Net Outlay", "GRP" after original columns
     output_cols = list(columns)
     extra_cols = ["Edit", "Final Spots", "Final FCT", "Net Outlay Recomputed", "GRP Recomputed"]
-    # Build daily date columns
     n_days = weeks * 7
     date_cols = [(camp_start + timedelta(days=i)) for i in range(n_days)]
     week_summary_start_label = "Weekly Spots"
     week_disp_label = "Weekly Spot Dispersion"
+    week_grp_pct_label = "Weekly GRP %"
 
-    # Header row
     header_row_idx = row
-    # write week banner
     for w in range(weeks):
         c_start = len(output_cols) + len(extra_cols) + 1 + w * 7 + 1
         ws.cell(row=row, column=c_start, value=f"Wk {w+1}").font = bold
     row += 1
-    # Days row (Mon-Sun repeating)
     for i, dt in enumerate(date_cols):
         col = len(output_cols) + len(extra_cols) + 1 + i + 1
         ws.cell(row=row, column=col, value=DAY_ORDER[dt.weekday()]).font = bold
     row += 1
 
-    # Column names row
     col_names_row = row
     for j, name in enumerate(output_cols):
         c = ws.cell(row=col_names_row, column=j + 1, value=name)
@@ -798,15 +842,13 @@ def build_output_workbook(plan_doc: Dict[str, Any], result_doc: Dict[str, Any]) 
         c.font = header_font
         c.fill = header_fill
         c.alignment = center
-    # date columns
     date_col_start = len(output_cols) + len(extra_cols) + 1
     for i, dt in enumerate(date_cols):
         c = ws.cell(row=col_names_row, column=date_col_start + i, value=dt)
         c.font = header_font
         c.fill = header_fill
         c.alignment = center
-        c.number_format = "yyyy-mm-dd"
-    # week summary columns
+        c.number_format = "dd-mmm"
     ws_start = date_col_start + n_days + 1
     ws.cell(row=header_row_idx, column=ws_start, value=week_summary_start_label).font = bold
     for w in range(weeks):
@@ -819,61 +861,200 @@ def build_output_workbook(plan_doc: Dict[str, Any], result_doc: Dict[str, Any]) 
         c = ws.cell(row=col_names_row, column=disp_start + w, value=f"Wk {w+1}")
         c.font = header_font
         c.fill = header_fill
+    grp_pct_start = disp_start + weeks + 1
+    ws.cell(row=header_row_idx, column=grp_pct_start, value=week_grp_pct_label).font = bold
+    for w in range(weeks):
+        c = ws.cell(row=col_names_row, column=grp_pct_start + w, value=f"Wk {w+1}")
+        c.font = header_font
+        c.fill = header_fill
 
     row = col_names_row + 1
 
-    # Index raw rows by _row_id for lookup
     raw_by_id = {r["_row_id"]: r for r in raw_rows}
-    # Index schedule spots per (row_id, edit_duration, date)
     sched_index: Dict[tuple, int] = {}
     for s in schedule_rows:
         key = (s["_row_id"], s["edit_duration"], s["date"])
         sched_index[key] = sched_index.get(key, 0) + 1
-
     date_iso_list = [d.isoformat() for d in date_cols]
 
-    # Emit edit sub-rows grouped by row_id
-    grouped: Dict[int, List[Dict]] = {}
+    # Attach per-spot-GRP for each row (constant per plan row)
+    per_row_grp_per_spot: Dict[int, float] = {}
     for er in edit_rows:
-        grouped.setdefault(er["_row_id"], []).append(er)
+        rid = er["_row_id"]
+        if rid in per_row_grp_per_spot:
+            continue
+        s = safe_num(er.get("final_spots"))
+        g = safe_num(er.get("grp"))
+        per_row_grp_per_spot[rid] = (g / s) if s > 0 else 0
 
-    for rid in sorted(grouped.keys()):
-        for er in grouped[rid]:
-            raw = raw_by_id.get(rid, {})
-            # Write original columns
-            for j, cname in enumerate(output_cols):
-                v = raw.get(cname)
-                ws.cell(row=row, column=j + 1, value=v)
-            # Extra columns
-            base = len(output_cols)
-            ws.cell(row=row, column=base + 1, value=er["edit_duration"])
-            ws.cell(row=row, column=base + 2, value=er["final_spots"])
-            ws.cell(row=row, column=base + 3, value=er["final_fct"])
-            ws.cell(row=row, column=base + 4, value=er["net_outlay"])
-            ws.cell(row=row, column=base + 5, value=er["grp"])
+    def write_data_row(er: Dict, raw: Dict, target_row: int):
+        for j, cname in enumerate(output_cols):
+            v = raw.get(cname)
+            ws.cell(row=target_row, column=j + 1, value=v)
+        base = len(output_cols)
+        ws.cell(row=target_row, column=base + 1, value=er["edit_duration"])
+        ws.cell(row=target_row, column=base + 2, value=er["final_spots"])
+        ws.cell(row=target_row, column=base + 3, value=er["final_fct"])
+        ws.cell(row=target_row, column=base + 4, value=er["net_outlay"])
+        ws.cell(row=target_row, column=base + 5, value=er["grp"])
 
-            # Daily matrix
-            weekly_counts = [0] * weeks
+        weekly_counts = [0] * weeks
+        rid = er["_row_id"]
+        for i, iso in enumerate(date_iso_list):
+            n = sched_index.get((rid, er["edit_duration"], iso), 0)
+            if n:
+                ws.cell(row=target_row, column=date_col_start + i, value=n)
+                weekly_counts[i // 7] += n
+        total_week_spots = sum(weekly_counts)
+        for w in range(weeks):
+            ws.cell(row=target_row, column=ws_start + w, value=weekly_counts[w])
+        for w in range(weeks):
+            pct = (weekly_counts[w] * 100.0 / total_week_spots) if total_week_spots else 0
+            ws.cell(row=target_row, column=disp_start + w, value=round(pct, 2))
+        # Weekly GRP % (weekly_grp / total_row_grp * 100)
+        row_grp = safe_num(er.get("grp"))
+        gps = per_row_grp_per_spot.get(rid, 0)
+        for w in range(weeks):
+            weekly_grp = weekly_counts[w] * gps
+            pct = (weekly_grp * 100.0 / row_grp) if row_grp else 0
+            ws.cell(row=target_row, column=grp_pct_start + w, value=round(pct, 2))
+        return weekly_counts
+
+    def write_subtotal(label: str, group_rows: List[Dict], target_row: int, level: str = "channel"):
+        # Compute totals
+        spots = sum(er["final_spots"] for er in group_rows)
+        fct = sum(er["final_fct"] for er in group_rows)
+        outlay = sum(er["net_outlay"] for er in group_rows)
+        grp = sum(er["grp"] for er in group_rows)
+        # Weekly counts aggregate
+        weekly_counts = [0] * weeks
+        for er in group_rows:
+            rid = er["_row_id"]
             for i, iso in enumerate(date_iso_list):
                 n = sched_index.get((rid, er["edit_duration"], iso), 0)
-                if n:
-                    ws.cell(row=row, column=date_col_start + i, value=n)
-                    weekly_counts[i // 7] += n
+                weekly_counts[i // 7] += n
+        total_week_spots = sum(weekly_counts)
+        row_grp_total = grp
 
-            total_week = sum(weekly_counts)
-            for w in range(weeks):
-                ws.cell(row=row, column=ws_start + w, value=weekly_counts[w])
-            for w in range(weeks):
-                pct = (weekly_counts[w] * 100.0 / total_week) if total_week else 0
-                ws.cell(row=row, column=disp_start + w, value=round(pct, 2))
+        # Label cell + fills
+        c = ws.cell(row=target_row, column=1, value=label)
+        c.font = bold
+        for j in range(1, len(output_cols) + len(extra_cols) + 1 + n_days + 3 * weeks + 2):
+            ws.cell(row=target_row, column=j).fill = subtotal_fill if level != "grand" else grand_fill
+            if level == "grand":
+                ws.cell(row=target_row, column=j).font = grand_font
 
+        base = len(output_cols)
+        ws.cell(row=target_row, column=base + 2, value=spots).font = bold
+        ws.cell(row=target_row, column=base + 3, value=round(fct, 2)).font = bold
+        ws.cell(row=target_row, column=base + 4, value=round(outlay, 2)).font = bold
+        ws.cell(row=target_row, column=base + 5, value=round(grp, 3)).font = bold
+        for i, iso in enumerate(date_iso_list):
+            n = 0
+            for er in group_rows:
+                n += sched_index.get((er["_row_id"], er["edit_duration"], iso), 0)
+            if n:
+                ws.cell(row=target_row, column=date_col_start + i, value=n).font = bold
+        for w in range(weeks):
+            ws.cell(row=target_row, column=ws_start + w, value=weekly_counts[w]).font = bold
+        for w in range(weeks):
+            pct = (weekly_counts[w] * 100.0 / total_week_spots) if total_week_spots else 0
+            ws.cell(row=target_row, column=disp_start + w, value=round(pct, 2)).font = bold
+        # Weekly GRP % for the group: sum(weekly_spots_of_each_row * gps_of_that_row)
+        for w in range(weeks):
+            weekly_grp = 0.0
+            for er in group_rows:
+                rid = er["_row_id"]
+                gps = per_row_grp_per_spot.get(rid, 0)
+                w_start_idx = w * 7
+                w_end_idx = w_start_idx + 7
+                n = 0
+                for i in range(w_start_idx, min(w_end_idx, len(date_iso_list))):
+                    n += sched_index.get((rid, er["edit_duration"], date_iso_list[i]), 0)
+                weekly_grp += n * gps
+            pct = (weekly_grp * 100.0 / row_grp_total) if row_grp_total else 0
+            ws.cell(row=target_row, column=grp_pct_start + w, value=round(pct, 2)).font = bold
+
+    # Sort edit_rows and group by market > genre > channel
+    def key_for(er):
+        return (
+            str(er.get("market") or ""),
+            str(er.get("genre") or ""),
+            str(er.get("channel") or ""),
+            er.get("_row_id", 0),
+            er.get("edit_duration", 0),
+        )
+    sorted_edits = sorted(edit_rows, key=key_for)
+
+    # Emit with subtotals
+    cur_market = None
+    cur_genre = None
+    cur_channel = None
+    channel_rows: List[Dict] = []
+    genre_rows: List[Dict] = []
+    market_rows: List[Dict] = []
+    grand_rows: List[Dict] = []
+
+    def flush_channel():
+        nonlocal row, channel_rows
+        if channel_rows and cur_channel is not None:
+            write_subtotal(f"{cur_channel} Total", channel_rows, row, level="channel")
             row += 1
+        channel_rows = []
+
+    def flush_genre():
+        nonlocal row, genre_rows
+        if genre_rows and cur_genre is not None:
+            write_subtotal(f"{cur_market} {cur_genre} Total", genre_rows, row, level="genre")
+            row += 1
+        genre_rows = []
+
+    def flush_market():
+        nonlocal row, market_rows
+        if market_rows and cur_market is not None:
+            write_subtotal(f"{cur_market} Total", market_rows, row, level="market")
+            row += 1
+        market_rows = []
+
+    for er in sorted_edits:
+        m = er.get("market")
+        g = er.get("genre")
+        ch = er.get("channel")
+        if cur_market is None:
+            cur_market, cur_genre, cur_channel = m, g, ch
+        else:
+            if ch != cur_channel or g != cur_genre or m != cur_market:
+                flush_channel()
+                if g != cur_genre or m != cur_market:
+                    flush_genre()
+                    if m != cur_market:
+                        flush_market()
+                        cur_market = m
+                    cur_genre = g
+                cur_channel = ch
+
+        raw = raw_by_id.get(er["_row_id"], {})
+        write_data_row(er, raw, row)
+        row += 1
+        channel_rows.append(er)
+        genre_rows.append(er)
+        market_rows.append(er)
+        grand_rows.append(er)
+
+    # Final flushes
+    flush_channel()
+    flush_genre()
+    flush_market()
+
+    if grand_rows:
+        write_subtotal("GRAND TOTAL", grand_rows, row, level="grand")
+        row += 1
 
     # column widths
     for j in range(1, min(len(output_cols) + len(extra_cols) + 1, 50)):
         ws.column_dimensions[ws.cell(row=col_names_row, column=j).column_letter].width = 14
 
-    # Add a second sheet: Edit Config + Preferences
+    # Second sheet: Edit Config + Preferences
     ws2 = wb.create_sheet("Edit Config")
     ws2.append(["Duration (s)", "Percentage"])
     for e in result_doc["edits"]:

@@ -19,16 +19,30 @@ const DAYPARTS = [
 export default function StepPrefs({ prefs, setPrefs, upload }) {
   const setKey = (k, v) => setPrefs({ ...prefs, [k]: v });
 
-  const weeks = Math.max(1, prefs.campaign_weeks || 1);
+  // Derive weeks from start/end date if both are set, else fall back to campaign_weeks
+  const derivedWeeks = (() => {
+    if (prefs.campaign_start && prefs.campaign_end) {
+      const s = new Date(prefs.campaign_start);
+      const e = new Date(prefs.campaign_end);
+      if (!isNaN(s) && !isNaN(e) && e >= s) {
+        const days = Math.floor((e - s) / (24 * 3600 * 1000)) + 1;
+        return Math.max(1, Math.ceil(days / 7));
+      }
+    }
+    return Math.max(1, prefs.campaign_weeks || 1);
+  })();
+  const weeks = derivedWeeks;
 
   useEffect(() => {
     setPrefs((p) => {
-      if (p.weekly_grp_dispersion.length === weeks) return p;
-      const base = 100 / weeks;
-      return {
-        ...p,
-        weekly_grp_dispersion: Array.from({ length: weeks }, () => Number(base.toFixed(2))),
-      };
+      const patch = {};
+      if (p.campaign_weeks !== weeks) patch.campaign_weeks = weeks;
+      if (p.weekly_grp_dispersion.length !== weeks) {
+        const base = 100 / weeks;
+        patch.weekly_grp_dispersion = Array.from({ length: weeks }, () => Number(base.toFixed(2)));
+      }
+      if (Object.keys(patch).length === 0) return p;
+      return { ...p, ...patch };
     });
   }, [weeks, setPrefs]);
 
@@ -45,6 +59,52 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
       has ? prefs.blackout_days.filter((x) => x !== d) : [...prefs.blackout_days, d]
     );
   };
+
+  // Blackout dates: user types DD-MM-YY (or DD-MM-YYYY) comma/space separated.
+  // We store as ISO YYYY-MM-DD.
+  const parseDDMMYY = (s) => {
+    const parts = s.trim().split(/[-/.]/);
+    if (parts.length !== 3) return null;
+    let [dd, mm, yy] = parts;
+    if (dd.length > 2 && yy.length <= 2) {
+      // Might be YYYY-MM-DD already
+      const y = dd, d = yy;
+      dd = d;
+      yy = y;
+    }
+    const d = parseInt(dd, 10);
+    const m = parseInt(mm, 10);
+    let y = parseInt(yy, 10);
+    if (isNaN(d) || isNaN(m) || isNaN(y)) return null;
+    if (y < 100) y += 2000;
+    if (d < 1 || d > 31 || m < 1 || m > 12) return null;
+    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  };
+
+  const formatDDMMYY = (iso) => {
+    if (!iso) return "";
+    const [y, m, d] = iso.split("-");
+    return `${d}-${m}-${y.slice(2)}`;
+  };
+
+  const onBlackoutDatesChange = (text) => {
+    // Store the raw text in a transient field; only convert on blur.
+    setKey("_blackout_dates_text", text);
+  };
+  const commitBlackoutDates = () => {
+    const raw = prefs._blackout_dates_text ?? prefs.blackout_dates.map(formatDDMMYY).join(", ");
+    const tokens = raw.split(/[,;\n]+/).map((t) => t.trim()).filter(Boolean);
+    const iso = [];
+    for (const t of tokens) {
+      const p = parseDDMMYY(t);
+      if (p) iso.push(p);
+    }
+    setPrefs({ ...prefs, blackout_dates: iso, _blackout_dates_text: undefined });
+  };
+  const blackoutDatesText =
+    prefs._blackout_dates_text !== undefined
+      ? prefs._blackout_dates_text
+      : (prefs.blackout_dates || []).map(formatDDMMYY).join(", ");
 
   const gecOnly = !!prefs.gec_planning_weeks;
   const weeklyTotal = prefs.weekly_grp_dispersion.reduce((a, b) => a + Number(b || 0), 0);
@@ -82,18 +142,21 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
             />
           </div>
           <div>
-            <Label className="overline">Duration (weeks)</Label>
+            <Label className="overline">Campaign end</Label>
             <Input
-              type="number"
-              min="1"
-              max="52"
-              value={prefs.campaign_weeks}
-              onChange={(e) => setKey("campaign_weeks", parseInt(e.target.value || 1))}
-              className="mt-1 tabular"
-              data-testid="campaign-weeks-input"
+              type="date"
+              value={prefs.campaign_end || ""}
+              onChange={(e) => setKey("campaign_end", e.target.value)}
+              className="mt-1"
+              data-testid="campaign-end-input"
             />
           </div>
         </div>
+        <p className="text-xs text-muted-foreground mt-2 tabular">
+          Duration: <span className="font-semibold text-foreground">{weeks} week{weeks !== 1 ? "s" : ""}</span>
+          {" · schedule starts on "}
+          <span className="font-semibold text-foreground">{prefs.campaign_start || "—"}</span>
+        </p>
 
         <div className="mt-6">
           <Label className="overline">Spot frequency</Label>
@@ -168,6 +231,35 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
               );
             })}
           </div>
+        </div>
+
+        <div className="mt-6 border-t border-border pt-6">
+          <Label className="overline">Blackout dates (DD-MM-YY)</Label>
+          <p className="text-xs text-muted-foreground mt-1">
+            Specific dates to skip. Enter comma-separated, e.g.{" "}
+            <span className="tabular text-foreground">15-08-26, 02-10-26</span>
+          </p>
+          <textarea
+            className="mt-2 w-full border border-border px-3 py-2 text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-primary"
+            rows={2}
+            value={blackoutDatesText}
+            onChange={(e) => onBlackoutDatesChange(e.target.value)}
+            onBlur={commitBlackoutDates}
+            placeholder="15-08-26, 02-10-26"
+            data-testid="blackout-dates-input"
+          />
+          {(prefs.blackout_dates || []).length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5" data-testid="blackout-dates-chips">
+              {prefs.blackout_dates.map((iso) => (
+                <span
+                  key={iso}
+                  className="px-2 py-0.5 border border-destructive text-destructive text-xs tabular"
+                >
+                  {formatDDMMYY(iso)}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="mt-6 border-t border-border pt-6">

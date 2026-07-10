@@ -25,7 +25,7 @@ class TestUpload:
     def test_upload_real_input(self, uploaded_plan):
         data = uploaded_plan
         assert "plan_id" in data
-        assert data["row_count"] >= 50, f"Expected >=50 rows, got {data['row_count']}"
+        assert data["row_count"] >= 40, f"Expected >=40 rows, got {data['row_count']}"
         assert data["summary"]["total_spots"] >= 1000, f"total_spots={data['summary']['total_spots']}"
         # metadata should include Client/Campaign
         md = data.get("metadata", {})

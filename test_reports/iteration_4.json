@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 4 verified. All 5 iteration-4 features work end-to-end. Backend: added test_iteration4.py with 8 tests (all pass) covering subtotal-row filter (46 real rows), campaign_end -> derived 7 weeks (2026-06-29..2026-08-16), blackout_dates ['2026-07-04','2026-07-15'] correctly excluded from schedule, downloaded xlsx header starts at campaign_start (Jun 29), and Schedule Sheet contains GRAND TOTAL + Channel/Genre/Market subtotals + 3 weekly sections (Weekly Spots / Weekly Spot Dispersion / Weekly GRP). Legacy backend_test.py updated (old '>=50 rows' bound relaxed to >=40 to reflect new subtotal filter behaviour). Frontend Playwright full-flow: upload input.xlsx (toast 'Loaded 46 rows'), Step 3 shows both campaign-start-input & campaign-end-input, derived duration text 'Duration: 7 weeks · schedule starts on 2026-06-29', 7 week-input rows rendered, blackout textarea '04-07-26, 15-07-26' committed on blur -> chips 04-07-26 & 15-07-26 visible, Generate Plan -> results with W1..W7 chart & 3229 spots, Download Excel produced 59.3KB xlsx.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Step 4 Review & Export", "issues": ["Recharts prints repeated console warning 'The width(-1) and height(-1) of chart should be greater than 0' on initial mount (Edit-wise Split pie / Weekly bar). Cosmetic only, chart renders correctly after layout — consider ensuring parent ResponsiveContainer has explicit min height/width to silence warnings."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration4.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_iter4.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py continues to grow (>950 lines) — still recommend splitting parsing/generation/export/sessions into modules per >700-line guideline.",
+    "StepPrefs.commitBlackoutDates parses tokens but silently drops invalid entries; consider surfacing a small hint when user typed something un-parseable so they know it was ignored.",
+    "Recharts ResponsiveContainer emits width/height(-1) warnings on first mount — set minWidth/minHeight or aspect to remove noise."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration4.py",
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "100% (17/17 tests across both files)", "frontend": "100%"},
+  "seed_data_creation": "None persisted (upload/generate creates transient plan+result docs; not cleaned since read-only in test).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 4 shipped 5 changes: campaign start+end dates, weeks NOT Monday-aligned, DD-MM-YY blackout dates textarea, subtotal filtering on upload (46 vs 58 rows), and xlsx output with Channel/Genre/Market/GRAND subtotals + 3 weekly sections (Spots / Dispersion / GRP%). Backend tests in /app/backend/tests/test_iteration4.py cover all 5. Front-end flow validated via Playwright end-to-end incl. Download Excel (59KB file produced). Backend URL: https://spot-scheduling-hub.preview.emergentagent.com.",
+  "rca of the issue": "N/A — all iteration-4 features verified working."
+}
