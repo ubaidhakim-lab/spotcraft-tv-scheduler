@@ -700,14 +700,29 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
         row_edits = override_map.get(r["_row_id"], edits_global)
         per_spot_grp = (grp_total / spots_total) if spots_total > 0 else 0
 
-        # First pass: compute raw demand + capacity per edit
+        # First pass: compute raw demand + capacity per edit (preserve FCT + total spots)
         demands = []
         capacities = []
+        raw_demands = []
         for e in row_edits:
             edit_fct = fct * (e.percentage / 100.0)
             raw = edit_fct / e.duration if e.duration > 0 else 0
-            demands.append(int(round(raw)))
+            raw_demands.append(raw)
+            demands.append(int(raw))  # floor
             capacities.append(compute_edit_capacity(r, e.duration))
+        # Distribute rounding remainder across edits by largest fractional part.
+        # Target total = mathematically correct total (round of sum of raw fractionals),
+        # which respects FCT preservation. Do NOT force original spots_total — with
+        # different edit durations vs ACD, the spot count naturally shifts.
+        target_total = int(round(sum(raw_demands)))
+        remainder = target_total - sum(demands)
+        if remainder > 0:
+            frac_order = sorted(
+                range(len(row_edits)),
+                key=lambda i: -(raw_demands[i] - demands[i]),
+            )
+            for k in range(remainder):
+                demands[frac_order[k % len(frac_order)]] += 1
 
         # Cap each edit at its capacity; try to rebalance any surplus into siblings with headroom
         capped = [min(demands[i], capacities[i]) for i in range(len(row_edits))]

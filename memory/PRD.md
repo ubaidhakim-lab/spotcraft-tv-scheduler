@@ -46,3 +46,11 @@ Adapted to real-world file formats + 4 enhancements requested by user.
 - Front-load and Bell curve preset buttons for weekly dispersion
 - Metadata card in Upload summary shows Client/Brand/Campaign
 - Row 4 stat cards + weekly bar + edit pie + 3 tabs (Edit-wise, Day-wise Schedule, By Channel)
+
+## 2026-02 Update: No-Drop Scheduling Fix
+- `compute_edit_capacity` no longer caps at physical slot capacity — returns 10^9 sentinel whenever any eligible day exists in the campaign window; returns 0 only when the row is fully blacked out.
+- `allocate_spots_daily` continues to support stacking via `slots[i % len(slots)]` — when demand exceeds unique half-hour slots, multiple spots are placed in the same slot rather than dropped.
+- FCT->edit split now distributes rounding remainder across edits by largest fractional part, preserving `round(sum(raw_demands))` exactly.
+- Verified via `/tmp/gen_test_plan.py` and `/tmp/stress_test.py` + testing_agent iteration 16 (13/14 pass; the only miss is an aggregate-evenness soft target).
+
+Invariant guaranteed: `len(schedule_rows) == sum(er.final_spots for er in edit_rows)` for every generated plan.
