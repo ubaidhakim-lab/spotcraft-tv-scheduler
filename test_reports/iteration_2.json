@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 2 testing with real /tmp/samples/input.xlsx + output.xlsx. Backend 10/10 pytest passing: upload parses 58 rows/7164 spots correctly, learn-sample extracts edits+weekly dispersion, generate produces 232 edit_rows for 4-edit config, row_overrides correctly reduces row0 to 1 edit row, daypart_weights don't crash, sessions CRUD works, download returns Schedule Sheet xlsx. Frontend Steps 1-3 fully working (upload auto-advances, 58 rows shown with Client=M K Agrotech Ltd/Campaign metadata, preset-45-30-20-10 gives 4 edit rows totaling 100%, per-row override dialog saves & shows override mix, 7 week inputs + 7 daypart sliders on Step 3, Frontload/Bell curve presets work). CRITICAL FRONTEND BUG on Step 4: results page crashes with 'Cannot read properties of undefined (reading toLocaleString)' causing entire React tree to unmount to blank white page — root cause is field-name mismatch between backend edit_rows and frontend StepResults.jsx (backend returns final_fct/final_spots/grp/net_outlay, frontend reads edit_fct/edit_spots_int/grp_share/outlay_share).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "StepResults.jsx (Edit tab table + potentially stat cards on very small results)",
+        "issue": "Crashes with 'Cannot read properties of undefined (reading toLocaleString)' after successful /generate. Field names mismatch: frontend reads r.edit_fct / r.edit_spots_int / r.grp_share / r.outlay_share on each edit row, but backend generate endpoint returns r.final_fct / r.final_spots / r.grp / r.net_outlay. Result: React tree unmounts, blank white page, user cannot see results or click download/save/sessions.",
+        "selector": "[data-testid=\"edit-table\"] rows (lines 186/187/188/189 of StepResults.jsx)",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Step 4 results rendering + all downstream flows (download, save-session, sessions dialog)",
+        "issue": "Blocked by the above crash. Backend endpoints all work (verified via pytest) but user cannot reach them through the UI after generation.",
+        "affected_selectors": ["[data-testid=\"download-button\"]", "[data-testid=\"download-link\"]", "[data-testid=\"tabs-list\"]", "[data-testid=\"save-session-button\"]", "[data-testid=\"sessions-open-button\"]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "FIX StepResults.jsx line 186: r.edit_fct -> r.final_fct",
+    "FIX StepResults.jsx line 187: r.edit_spots_int -> r.final_spots",
+    "FIX StepResults.jsx line 188: r.grp_share -> r.grp",
+    "FIX StepResults.jsx line 189: r.outlay_share -> r.net_outlay",
+    "(Optional) Add a React error boundary at PlanBuilder level so a component render error doesn't blank the entire app."
+  ],
+  "critical_code_review_comments": [
+    "Backend/frontend contract drift: iteration-2 backend rewrite renamed edit_row fields but StepResults.jsx wasn't updated. Recommend a shared TypeScript/JSDoc types file or one integration test per tab that mounts real data.",
+    "Header (with Sessions/Save/Start Over) is inside PlanBuilder but is NOT protected by an error boundary — a child crash removes even the header, leaving user with a blank page and no way to recover except manual reload.",
+    "server.py grew to 950+ lines; consider splitting parsing (read_workbook, canonicalization), generate logic, and Excel builder into separate modules for maintainability."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py (new)"],
+  "success_rate": {"backend": "100% (10/10 pytest)", "frontend": "~75% - Steps 1/2/3 fully working, Step 4 blocked by crash"},
+  "seed_data_creation": "One TEST_ prefixed session was attempted; sessions API verified working via backend_test.py (created and cleaned up).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Reproduce Step 4 crash by uploading /tmp/samples/input.xlsx, applying preset-45-30-20-10, going to Step 3, clicking generate-button. Watch page console — you will see the pageerror. Once the 4 field renames in StepResults.jsx are applied, re-run the frontend Playwright flow to validate download-button href, tab-schedule/tab-channel navigation, save-session-button prompt, and sessions-open-button dialog listing.",
+  "rca_of_the_issue": "Root cause: In server.py generate_plan the edit_rows entries use keys `final_fct`, `final_spots`, `grp`, `net_outlay` (lines 594-599). Frontend StepResults.jsx Edit tab expects `edit_fct`, `edit_spots_int`, `grp_share`, `outlay_share`. On first render of the edit table, `undefined.toLocaleString()` throws, React unmounts the tree (no error boundary). Reproduction: upload real file -> generate -> whole page blanks. Mitigation: rename 4 fields in StepResults.jsx to match backend contract."
+}

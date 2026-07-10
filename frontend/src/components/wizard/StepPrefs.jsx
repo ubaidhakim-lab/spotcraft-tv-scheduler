@@ -3,16 +3,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Slider } from "@/components/ui/slider";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DAYPARTS = [
+  "Morning",
+  "Late Morning",
+  "Afternoon",
+  "Late Afternoon",
+  "Prime Time",
+  "Late Prime",
+  "Overnight",
+];
 
 export default function StepPrefs({ prefs, setPrefs, upload }) {
   const setKey = (k, v) => setPrefs({ ...prefs, [k]: v });
 
   const weeks = Math.max(1, prefs.campaign_weeks || 1);
 
-  // Ensure weekly_grp_dispersion length matches weeks
   useEffect(() => {
     if (prefs.weekly_grp_dispersion.length !== weeks) {
       const base = 100 / weeks;
@@ -41,6 +49,16 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
   const gecOnly = !!prefs.gec_planning_weeks;
   const weeklyTotal = prefs.weekly_grp_dispersion.reduce((a, b) => a + Number(b || 0), 0);
 
+  const weightOf = (dp) => {
+    const w = prefs.daypart_weights.find((x) => x.daypart === dp);
+    return w ? w.weight : 1;
+  };
+  const setWeight = (dp, val) => {
+    const others = prefs.daypart_weights.filter((x) => x.daypart !== dp);
+    setKey("daypart_weights", [...others, { daypart: dp, weight: val }]);
+  };
+  const resetDayparts = () => setKey("daypart_weights", []);
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <section className="bg-white border border-border p-8">
@@ -64,7 +82,7 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
             />
           </div>
           <div>
-            <Label className="overline">Campaign duration (weeks)</Label>
+            <Label className="overline">Duration (weeks)</Label>
             <Input
               type="number"
               min="1"
@@ -86,9 +104,7 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
               min="5"
               step="5"
               value={prefs.spot_frequency_minutes}
-              onChange={(e) =>
-                setKey("spot_frequency_minutes", parseInt(e.target.value || 30))
-              }
+              onChange={(e) => setKey("spot_frequency_minutes", parseInt(e.target.value || 30))}
               className="w-24 tabular"
               data-testid="spot-frequency-input"
             />
@@ -118,9 +134,7 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
                 min="1"
                 max={weeks}
                 value={prefs.gec_planning_weeks}
-                onChange={(e) =>
-                  setKey("gec_planning_weeks", parseInt(e.target.value || 1))
-                }
+                onChange={(e) => setKey("gec_planning_weeks", parseInt(e.target.value || 1))}
                 className="w-20 tabular"
                 data-testid="gec-weeks-input"
               />
@@ -155,6 +169,43 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
             })}
           </div>
         </div>
+
+        <div className="mt-6 border-t border-border pt-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label className="overline">Daypart Weighting</Label>
+              <p className="text-xs text-muted-foreground mt-1">
+                Bias slot selection toward specific dayparts (higher = more spots)
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={resetDayparts} data-testid="reset-dayparts">
+              Reset
+            </Button>
+          </div>
+          <div className="mt-4 space-y-3" data-testid="daypart-weights">
+            {DAYPARTS.map((dp) => {
+              const w = weightOf(dp);
+              return (
+                <div key={dp} className="grid grid-cols-12 gap-3 items-center">
+                  <div className="col-span-4 text-sm">{dp}</div>
+                  <div className="col-span-6">
+                    <Slider
+                      value={[w]}
+                      min={0}
+                      max={3}
+                      step={0.1}
+                      onValueChange={(v) => setWeight(dp, v[0])}
+                      data-testid={`weight-slider-${dp.replace(/\s+/g, "-").toLowerCase()}`}
+                    />
+                  </div>
+                  <div className="col-span-2 text-right tabular text-sm font-semibold">
+                    {w.toFixed(1)}x
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </section>
 
       <section className="bg-white border border-border p-8">
@@ -163,7 +214,7 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
           Distribute weight across weeks
         </h2>
         <p className="text-muted-foreground mt-2 text-sm">
-          Enter week-wise % that sums to 100. This will drive both GRP and spot allocation.
+          Enter week-wise % that sums to 100. This drives both GRP and spot allocation.
         </p>
 
         <div className="mt-6 space-y-3" data-testid="weeks-list">
@@ -205,21 +256,58 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
             {weeklyTotal.toFixed(1)}%
           </span>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-3"
-          onClick={() => {
-            const base = 100 / weeks;
-            setKey(
-              "weekly_grp_dispersion",
-              Array.from({ length: weeks }, () => Number(base.toFixed(2)))
-            );
-          }}
-          data-testid="reset-weekly-button"
-        >
-          Reset to Uniform
-        </Button>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const base = 100 / weeks;
+              setKey(
+                "weekly_grp_dispersion",
+                Array.from({ length: weeks }, () => Number(base.toFixed(2)))
+              );
+            }}
+            data-testid="reset-weekly-button"
+          >
+            Uniform
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              // Frontload: descending
+              const raw = Array.from({ length: weeks }, (_, i) => weeks - i);
+              const s = raw.reduce((a, b) => a + b, 0);
+              setKey(
+                "weekly_grp_dispersion",
+                raw.map((r) => Number(((r * 100) / s).toFixed(2)))
+              );
+            }}
+            data-testid="frontload-weekly-button"
+          >
+            Front-load
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              // Bell curve
+              const mid = (weeks - 1) / 2;
+              const raw = Array.from({ length: weeks }, (_, i) => {
+                const d = i - mid;
+                return Math.exp(-(d * d) / (2 * Math.pow(weeks / 3.5, 2)));
+              });
+              const s = raw.reduce((a, b) => a + b, 0);
+              setKey(
+                "weekly_grp_dispersion",
+                raw.map((r) => Number(((r * 100) / s).toFixed(2)))
+              );
+            }}
+            data-testid="bell-weekly-button"
+          >
+            Bell curve
+          </Button>
+        </div>
       </section>
     </div>
   );
