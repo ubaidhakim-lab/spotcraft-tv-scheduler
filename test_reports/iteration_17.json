@@ -1,0 +1,29 @@
+{
+  "summary": "Iteration 17 regression + new-feature testing. Verified new channel_spots_per_day pref (backend) and new Step-3 UI (frontend). Backend: 8/8 new tests + 13/14 iter16 regression tests pass (1 pre-existing GEC evenness assertion unrelated to this iteration). Frontend Step 3 correctly (a) removed Daypart Weighting section, (b) removed Blackout days (day-of-week) section, (c) kept Blackout dates, (d) renders Average Spots per Day section grouped by GEC/Movies/News/Music with per-channel inputs, bulk-apply per genre, clear-all button, and live counter. End-to-end upload -> Step3 -> generate returns 200 with a valid schedule.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "N/A", "issue": "iter16 GEC prime-time 100-spot test still fails aggregate <1.5x evenness (ratio 1.75, min=4 max=7). Pre-existing from iter16 and unrelated to channel_spots_per_day."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration17_channel_spots_per_day.py",
+    "/app/test_reports/pytest/iter17.xml",
+    "/app/test_reports/pytest/iter17_regression.xml"
+  ],
+  "action_items": [
+    "(carry-over from iter16) Consider per-day aggregate rebalancer to tighten GEC evenness <1.5x across stacked edits."
+  ],
+  "critical_code_review_comments": [
+    "server.py generate_plan is still >700 lines (repeat feedback). channel_spots_per_day_map override at L831-843 is clean and correctly uses min() vs gec_planning_weeks.",
+    "ChannelSpotsPerDay model uses spots_per_day: float but semantically it's an integer daily cap; consider constraining to >0 with a validator to reject 0/negative silently ignored today.",
+    "StepPrefs.jsx: 524 lines, still borderline; genre grouping/bulk logic could be extracted into a ChannelSpotsPerDay subcomponent for testability."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration17_channel_spots_per_day.py"],
+  "success_rate": {"backend": "100% (8/8 new); 93% (13/14 iter16 regression, unrelated failure)", "frontend": "100% on the tested Step-3 flow"},
+  "seed_data_creation": "All synthetic plan xlsx generated in-memory (backend) or /tmp/ui_plan.xlsx (5 rows x 4 genres) for the UI test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "channel_spots_per_day feature fully verified: Star Plus 280/10 -> ~28 days (aired 25-30), Sony Max 60/5 -> 12-14 days, uncapped channels use full window, empty list == previous behaviour, very low rate (1/day * 500 spots) still schedules all 500 via stacking within 14-day cap, gec_planning_weeks vs channel_spots_per_day picks stricter both ways. Frontend Step-3 UI removed daypart-weights and blackout-days test-ids; genre-block-<gec|movies|news|music>, bulk-genre-*, spd-input-*, clear-channel-rates-button all render and function; live '0 of N channels configured' counter updates on fill/clear/bulk. Generate flow returns 200. Pre-existing iter16 GEC evenness test still fails identically (unrelated)."
+}

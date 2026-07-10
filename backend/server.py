@@ -39,6 +39,10 @@ class DaypartWeight(BaseModel):
     daypart: str
     weight: float
 
+class ChannelSpotsPerDay(BaseModel):
+    channel: str
+    spots_per_day: float
+
 class SchedulingPrefs(BaseModel):
     campaign_start: str
     campaign_end: Optional[str] = None
@@ -52,6 +56,7 @@ class SchedulingPrefs(BaseModel):
     blackout_days: List[str] = []
     blackout_dates: List[str] = []
     daypart_weights: List[DaypartWeight] = []
+    channel_spots_per_day: List[ChannelSpotsPerDay] = []
     weekend_boost: float = 1.0  # multiplier on Sat/Sun; 1 = neutral, >1 = more, <1 = less
     reach_vs_frequency: float = 0.5  # 0 = max reach (spread across days), 1 = max frequency (concentrate)
 
@@ -651,6 +656,14 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
 
     daypart_weight_map = {d.daypart: d.weight for d in prefs.daypart_weights} if prefs.daypart_weights else {}
 
+    # Channel-level spots-per-day: shapes how many active days each channel runs.
+    # E.g. Star Plus @ 10 spots/day + 280 planned spots -> runs 28 days (4 weeks),
+    # even if the campaign is 6 weeks long. Keys are exact channel names.
+    channel_spots_per_day_map: Dict[str, float] = {}
+    for cspd in (prefs.channel_spots_per_day or []):
+        if cspd.spots_per_day and cspd.spots_per_day > 0 and cspd.channel:
+            channel_spots_per_day_map[str(cspd.channel).strip()] = float(cspd.spots_per_day)
+
     # Blackout day-of-week names (e.g. "Sun") — kept alongside blackout_date_set (specific dates)
     blackout = set(prefs.blackout_days or [])
 
@@ -778,6 +791,15 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
     # -------- Day-wise schedule --------
     schedule_rows: List[Dict[str, Any]] = []
 
+    # Compute total planned spots per channel (across all edit_rows) so we can
+    # derive `active_weeks` for channels that have a spots_per_day target.
+    channel_total_spots: Dict[str, int] = {}
+    for er in edit_rows:
+        ch_name = str(er.get("channel") or "").strip()
+        if not ch_name:
+            continue
+        channel_total_spots[ch_name] = channel_total_spots.get(ch_name, 0) + int(er.get("final_spots", 0))
+
     # Global slot occupancy: per (channel, program, timeband, edit_duration)
     slot_occupancy: Dict[tuple, set] = {}
 
@@ -809,6 +831,16 @@ async def generate_plan(plan_id: str, req: GenerateRequest):
         eff_weeks = weeks
         if is_gec(er.get("genre")) and prefs.gec_planning_weeks:
             eff_weeks = min(weeks, prefs.gec_planning_weeks)
+        # Channel-level spots/day override: cap active weeks so the channel
+        # airs at approximately the requested spots/day rate.
+        ch_name = str(er.get("channel") or "").strip()
+        ch_spd = channel_spots_per_day_map.get(ch_name)
+        if ch_spd and ch_spd > 0:
+            ch_total = channel_total_spots.get(ch_name, 0)
+            if ch_total > 0:
+                needed_days = math.ceil(ch_total / ch_spd)
+                needed_weeks = max(1, math.ceil(needed_days / 7))
+                eff_weeks = min(eff_weeks, needed_weeks)
 
         base_disp = wk_disp[:eff_weeks]
         s = sum(base_disp)

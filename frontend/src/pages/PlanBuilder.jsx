@@ -39,6 +39,7 @@ const DEFAULT_PREFS = {
   blackout_days: [],
   blackout_dates: [],
   daypart_weights: [],
+  channel_spots_per_day: [],
   weekend_boost: 1.0,
   reach_vs_frequency: 0.5,
 };

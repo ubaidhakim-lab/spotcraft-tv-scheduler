@@ -1,20 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const DAYPARTS = [
-  "Morning",
-  "Late Morning",
-  "Afternoon",
-  "Late Afternoon",
-  "Prime Time",
-  "Late Prime",
-  "Overnight",
-];
 
 export default function StepPrefs({ prefs, setPrefs, upload }) {
   const setKey = (k, v) => setPrefs({ ...prefs, [k]: v });
@@ -52,14 +41,6 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
     setKey("weekly_grp_dispersion", arr);
   };
 
-  const toggleBlackout = (d) => {
-    const has = prefs.blackout_days.includes(d);
-    setKey(
-      "blackout_days",
-      has ? prefs.blackout_days.filter((x) => x !== d) : [...prefs.blackout_days, d]
-    );
-  };
-
   // Blackout dates: user types DD-MM-YY (or DD-MM-YYYY) comma/space separated.
   // We store as ISO YYYY-MM-DD.
   const parseDDMMYY = (s) => {
@@ -67,7 +48,6 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
     if (parts.length !== 3) return null;
     let [dd, mm, yy] = parts;
     if (dd.length > 2 && yy.length <= 2) {
-      // Might be YYYY-MM-DD already
       const y = dd, d = yy;
       dd = d;
       yy = y;
@@ -87,10 +67,7 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
     return `${d}-${m}-${y.slice(2)}`;
   };
 
-  const onBlackoutDatesChange = (text) => {
-    // Store the raw text in a transient field; only convert on blur.
-    setKey("_blackout_dates_text", text);
-  };
+  const onBlackoutDatesChange = (text) => setKey("_blackout_dates_text", text);
   const commitBlackoutDates = () => {
     const raw = prefs._blackout_dates_text ?? prefs.blackout_dates.map(formatDDMMYY).join(", ");
     const tokens = raw.split(/[,;\n]+/).map((t) => t.trim()).filter(Boolean);
@@ -109,15 +86,47 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
   const gecOnly = !!prefs.gec_planning_weeks;
   const weeklyTotal = prefs.weekly_grp_dispersion.reduce((a, b) => a + Number(b || 0), 0);
 
-  const weightOf = (dp) => {
-    const w = prefs.daypart_weights.find((x) => x.daypart === dp);
-    return w ? w.weight : 1;
+  // -------- Genre → channels map derived from uploaded plan --------
+  const genreChannels = useMemo(() => {
+    const map = new Map(); // genre -> ordered Set of channels
+    for (const row of upload?.rows || []) {
+      const g = String(row.genre || "Uncategorized").trim() || "Uncategorized";
+      const ch = String(row.channel || "").trim();
+      if (!ch) continue;
+      if (!map.has(g)) map.set(g, new Set());
+      map.get(g).add(ch);
+    }
+    return Array.from(map.entries()).map(([genre, chSet]) => ({
+      genre,
+      channels: Array.from(chSet),
+    }));
+  }, [upload]);
+
+  const spotsPerDayFor = (channel) => {
+    const found = (prefs.channel_spots_per_day || []).find((x) => x.channel === channel);
+    return found ? found.spots_per_day : "";
   };
-  const setWeight = (dp, val) => {
-    const others = prefs.daypart_weights.filter((x) => x.daypart !== dp);
-    setKey("daypart_weights", [...others, { daypart: dp, weight: val }]);
+
+  const setSpotsPerDay = (channel, val) => {
+    const parsed = val === "" || val === null || val === undefined ? 0 : parseFloat(val);
+    const list = (prefs.channel_spots_per_day || []).filter((x) => x.channel !== channel);
+    if (parsed > 0) list.push({ channel, spots_per_day: parsed });
+    setKey("channel_spots_per_day", list);
   };
-  const resetDayparts = () => setKey("daypart_weights", []);
+
+  const applyToGenre = (genre, channels, val) => {
+    const parsed = parseFloat(val || 0);
+    const others = (prefs.channel_spots_per_day || []).filter(
+      (x) => !channels.includes(x.channel)
+    );
+    const added = parsed > 0 ? channels.map((c) => ({ channel: c, spots_per_day: parsed })) : [];
+    setKey("channel_spots_per_day", [...others, ...added]);
+  };
+
+  const clearAllChannelRates = () => setKey("channel_spots_per_day", []);
+
+  const totalChannels = genreChannels.reduce((a, g) => a + g.channels.length, 0);
+  const filledChannels = (prefs.channel_spots_per_day || []).filter((x) => x.spots_per_day > 0).length;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -127,7 +136,7 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
           Campaign & pacing
         </h2>
         <p className="text-muted-foreground mt-2 text-sm">
-          Answer a few questions and we'll schedule the day-wise spots.
+          Set the window and daily rate per channel. We&apos;ll auto-shape the schedule.
         </p>
 
         <div className="mt-6 grid grid-cols-2 gap-4">
@@ -207,33 +216,6 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
         </div>
 
         <div className="mt-6 border-t border-border pt-6">
-          <Label className="overline">Blackout days</Label>
-          <p className="text-xs text-muted-foreground mt-1">
-            No spots will be scheduled on selected days
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2" data-testid="blackout-days">
-            {DAYS.map((d) => {
-              const active = prefs.blackout_days.includes(d);
-              return (
-                <button
-                  key={d}
-                  type="button"
-                  onClick={() => toggleBlackout(d)}
-                  className={`px-3 py-1.5 border text-sm transition-colors ${
-                    active
-                      ? "border-destructive bg-destructive text-white"
-                      : "border-border hover:border-primary"
-                  }`}
-                  data-testid={`blackout-${d.toLowerCase()}`}
-                >
-                  {d}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="mt-6 border-t border-border pt-6">
           <Label className="overline">Blackout dates (DD-MM-YY)</Label>
           <p className="text-xs text-muted-foreground mt-1">
             Specific dates to skip. Enter comma-separated, e.g.{" "}
@@ -260,43 +242,6 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
               ))}
             </div>
           )}
-        </div>
-
-        <div className="mt-6 border-t border-border pt-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label className="overline">Daypart Weighting</Label>
-              <p className="text-xs text-muted-foreground mt-1">
-                Bias slot selection toward specific dayparts (higher = more spots)
-              </p>
-            </div>
-            <Button variant="ghost" size="sm" onClick={resetDayparts} data-testid="reset-dayparts">
-              Reset
-            </Button>
-          </div>
-          <div className="mt-4 space-y-3" data-testid="daypart-weights">
-            {DAYPARTS.map((dp) => {
-              const w = weightOf(dp);
-              return (
-                <div key={dp} className="grid grid-cols-12 gap-3 items-center">
-                  <div className="col-span-4 text-sm">{dp}</div>
-                  <div className="col-span-6">
-                    <Slider
-                      value={[w]}
-                      min={0}
-                      max={3}
-                      step={0.1}
-                      onValueChange={(v) => setWeight(dp, v[0])}
-                      data-testid={`weight-slider-${dp.replace(/\s+/g, "-").toLowerCase()}`}
-                    />
-                  </div>
-                  <div className="col-span-2 text-right tabular text-sm font-semibold">
-                    {w.toFixed(1)}x
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         </div>
 
         <div className="mt-6 border-t border-border pt-6">
@@ -352,7 +297,7 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
         <div className="mt-6 border-t border-border pt-6">
           <Label className="overline">Movies Frequency Override</Label>
           <p className="text-xs text-muted-foreground mt-1">
-            Spots on movie channels (genre contains "MOV/Movie") use this frequency.
+            Spots on movie channels (genre contains &quot;MOV/Movie&quot;) use this frequency.
           </p>
           <div className="mt-2 flex items-center gap-3">
             <span className="text-sm text-muted-foreground">1 spot every</span>
@@ -370,107 +315,209 @@ export default function StepPrefs({ prefs, setPrefs, upload }) {
         </div>
       </section>
 
-      <section className="bg-white border border-border p-8">
-        <div className="overline mb-2">Weekly GRP Dispersion</div>
-        <h2 className="font-display text-2xl font-extrabold tracking-tight">
-          Distribute weight across weeks
-        </h2>
-        <p className="text-muted-foreground mt-2 text-sm">
-          Enter week-wise % that sums to 100. This drives both GRP and spot allocation.
-        </p>
-
-        <div className="mt-6 space-y-3" data-testid="weeks-list">
-          {prefs.weekly_grp_dispersion.map((v, i) => (
-            <div key={i} className="grid grid-cols-6 items-center gap-3">
-              <Label className="col-span-2 text-sm">Week {i + 1}</Label>
-              <div className="col-span-3 h-2 bg-muted overflow-hidden">
-                <div
-                  className="h-full bg-primary transition-all"
-                  style={{ width: `${Math.min(100, Number(v) || 0)}%` }}
-                />
-              </div>
-              <div className="col-span-1 relative">
-                <Input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={v}
-                  onChange={(e) => setWeek(i, e.target.value)}
-                  className="tabular pr-6 text-right"
-                  data-testid={`week-input-${i}`}
-                />
-                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                  %
-                </span>
-              </div>
+      <div className="space-y-6">
+        {/* -------- Channel spots/day (by genre) -------- */}
+        <section className="bg-white border border-border p-8" data-testid="channel-spots-per-day-section">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="overline mb-2">Average Spots per Day</div>
+              <h2 className="font-display text-2xl font-extrabold tracking-tight">
+                Daily rate by channel
+              </h2>
+              <p className="text-muted-foreground mt-2 text-sm">
+                Punch in the target avg spots/day per channel. We auto-derive how many days
+                each channel runs so it hits that rate.
+              </p>
             </div>
-          ))}
-        </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearAllChannelRates}
+              data-testid="clear-channel-rates-button"
+            >
+              Clear all
+            </Button>
+          </div>
 
-        <div className="mt-6 flex items-center justify-between border-t border-border pt-4">
-          <span className="text-sm text-muted-foreground">Total</span>
-          <span
-            className={`font-display font-bold text-xl tabular ${
-              Math.abs(weeklyTotal - 100) < 0.5 ? "text-primary" : "text-destructive"
-            }`}
-            data-testid="weekly-total"
-          >
-            {weeklyTotal.toFixed(1)}%
-          </span>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              const base = 100 / weeks;
-              setKey(
-                "weekly_grp_dispersion",
-                Array.from({ length: weeks }, () => Number(base.toFixed(2)))
-              );
-            }}
-            data-testid="reset-weekly-button"
-          >
-            Uniform
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              // Frontload: descending
-              const raw = Array.from({ length: weeks }, (_, i) => weeks - i);
-              const s = raw.reduce((a, b) => a + b, 0);
-              setKey(
-                "weekly_grp_dispersion",
-                raw.map((r) => Number(((r * 100) / s).toFixed(2)))
-              );
-            }}
-            data-testid="frontload-weekly-button"
-          >
-            Front-load
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              // Bell curve
-              const mid = (weeks - 1) / 2;
-              const raw = Array.from({ length: weeks }, (_, i) => {
-                const d = i - mid;
-                return Math.exp(-(d * d) / (2 * Math.pow(weeks / 3.5, 2)));
-              });
-              const s = raw.reduce((a, b) => a + b, 0);
-              setKey(
-                "weekly_grp_dispersion",
-                raw.map((r) => Number(((r * 100) / s).toFixed(2)))
-              );
-            }}
-            data-testid="bell-weekly-button"
-          >
-            Bell curve
-          </Button>
-        </div>
-      </section>
+          <div className="mt-4 text-xs text-muted-foreground tabular">
+            {filledChannels} of {totalChannels} channels configured
+          </div>
+
+          {genreChannels.length === 0 && (
+            <div className="mt-6 p-4 border border-dashed border-border text-sm text-muted-foreground">
+              No channels detected in the uploaded plan. Go back to Step 1 and upload a plan.
+            </div>
+          )}
+
+          <div className="mt-4 space-y-4">
+            {genreChannels.map(({ genre, channels }) => (
+              <div key={genre} className="border border-border" data-testid={`genre-block-${genre.replace(/\s+/g, "-").toLowerCase()}`}>
+                <div className="flex items-center justify-between bg-muted/50 px-4 py-2 border-b border-border">
+                  <div className="flex items-center gap-3">
+                    <span className="overline text-primary">{genre}</span>
+                    <span className="text-xs text-muted-foreground tabular">
+                      {channels.length} channel{channels.length !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-muted-foreground">Apply to all:</span>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      placeholder="e.g. 8"
+                      className="w-20 h-7 text-xs tabular"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          applyToGenre(genre, channels, e.currentTarget.value);
+                          e.currentTarget.value = "";
+                        }
+                      }}
+                      onBlur={(e) => {
+                        if (e.currentTarget.value) {
+                          applyToGenre(genre, channels, e.currentTarget.value);
+                          e.currentTarget.value = "";
+                        }
+                      }}
+                      data-testid={`bulk-genre-${genre.replace(/\s+/g, "-").toLowerCase()}`}
+                    />
+                  </div>
+                </div>
+                <div className="divide-y divide-border">
+                  {channels.map((ch) => (
+                    <div key={ch} className="grid grid-cols-12 items-center px-4 py-2 gap-3">
+                      <div className="col-span-8 text-sm truncate" title={ch}>
+                        {ch}
+                      </div>
+                      <div className="col-span-4 flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={spotsPerDayFor(ch)}
+                          onChange={(e) => setSpotsPerDay(ch, e.target.value)}
+                          placeholder="—"
+                          className="w-20 tabular text-right h-8"
+                          data-testid={`spd-input-${ch.replace(/[^a-z0-9]/gi, "-").toLowerCase()}`}
+                        />
+                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                          spots/day
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <p className="mt-4 text-[11px] text-muted-foreground">
+            Blank = no daily-rate cap. The scheduler still respects the plan&apos;s total spots
+            and the campaign start/end dates.
+          </p>
+        </section>
+
+        {/* -------- Weekly GRP Dispersion -------- */}
+        <section className="bg-white border border-border p-8">
+          <div className="overline mb-2">Weekly GRP Dispersion</div>
+          <h2 className="font-display text-2xl font-extrabold tracking-tight">
+            Distribute weight across weeks
+          </h2>
+          <p className="text-muted-foreground mt-2 text-sm">
+            Enter week-wise % that sums to 100. This drives both GRP and spot allocation.
+          </p>
+
+          <div className="mt-6 space-y-3" data-testid="weeks-list">
+            {prefs.weekly_grp_dispersion.map((v, i) => (
+              <div key={i} className="grid grid-cols-6 items-center gap-3">
+                <Label className="col-span-2 text-sm">Week {i + 1}</Label>
+                <div className="col-span-3 h-2 bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all"
+                    style={{ width: `${Math.min(100, Number(v) || 0)}%` }}
+                  />
+                </div>
+                <div className="col-span-1 relative">
+                  <Input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={v}
+                    onChange={(e) => setWeek(i, e.target.value)}
+                    className="tabular pr-6 text-right"
+                    data-testid={`week-input-${i}`}
+                  />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                    %
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-6 flex items-center justify-between border-t border-border pt-4">
+            <span className="text-sm text-muted-foreground">Total</span>
+            <span
+              className={`font-display font-bold text-xl tabular ${
+                Math.abs(weeklyTotal - 100) < 0.5 ? "text-primary" : "text-destructive"
+              }`}
+              data-testid="weekly-total"
+            >
+              {weeklyTotal.toFixed(1)}%
+            </span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const base = 100 / weeks;
+                setKey(
+                  "weekly_grp_dispersion",
+                  Array.from({ length: weeks }, () => Number(base.toFixed(2)))
+                );
+              }}
+              data-testid="reset-weekly-button"
+            >
+              Uniform
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const raw = Array.from({ length: weeks }, (_, i) => weeks - i);
+                const s = raw.reduce((a, b) => a + b, 0);
+                setKey(
+                  "weekly_grp_dispersion",
+                  raw.map((r) => Number(((r * 100) / s).toFixed(2)))
+                );
+              }}
+              data-testid="frontload-weekly-button"
+            >
+              Front-load
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const mid = (weeks - 1) / 2;
+                const raw = Array.from({ length: weeks }, (_, i) => {
+                  const d = i - mid;
+                  return Math.exp(-(d * d) / (2 * Math.pow(weeks / 3.5, 2)));
+                });
+                const s = raw.reduce((a, b) => a + b, 0);
+                setKey(
+                  "weekly_grp_dispersion",
+                  raw.map((r) => Number(((r * 100) / s).toFixed(2)))
+                );
+              }}
+              data-testid="bell-weekly-button"
+            >
+              Bell curve
+            </Button>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
