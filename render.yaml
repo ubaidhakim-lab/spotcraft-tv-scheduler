@@ -1,0 +1,19 @@
+# Deployment config for Render.com
+# One-click deploy: https://render.com/deploy?repo=https://github.com/ubaidhakim-lab/spotcraft-tv-scheduler
+services:
+  - type: web
+    name: spotcraft-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.deploy.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: MONGO_URL
+        sync: false          # set manually in Render dashboard (MongoDB Atlas SRV string)
+      - key: DB_NAME
+        value: spotcraft
+      - key: CORS_ORIGINS
+        sync: false          # set to your Vercel domain, e.g. https://spotcraft.vercel.app
+      - key: PYTHON_VERSION
+        value: 3.11.9
