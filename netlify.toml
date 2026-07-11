@@ -1,0 +1,16 @@
+[build]
+  base = "frontend"
+  command = "yarn install && yarn build"
+  publish = "frontend/build"
+
+[build.environment]
+  # Netlify uses this Node version. React 19 needs Node >= 18.
+  NODE_VERSION = "20"
+  # Skips the CI=true failure on warnings that some React apps hit
+  CI = "false"
+
+# Single Page App routing: send every unmatched request to index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
